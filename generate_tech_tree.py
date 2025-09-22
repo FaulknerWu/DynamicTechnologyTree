@@ -4,6 +4,7 @@ Stellaris Dynamic Technology Tree Generator
 
 import re
 import configparser
+import json
 import sys
 import os
 from pathlib import Path
@@ -92,9 +93,11 @@ class TechTreeGenerator:
         self.all_technologies: Dict[str, Technology] = {}
         self.base_game_tech_ids = set()
         self.tech_descriptions: Dict[str, Dict[str, str]] = {}
-        self.base_game_path, self.mod_folder_path, self.mod_filter_settings, self.localization_mod_list = self._load_configuration(config_path)
-        
+        self.base_game_path, self.mod_folder_path, self.dlc_load_json_path, self.localization_mod_list = self._load_configuration(config_path)
+
         self.current_mod_folder_name = Path(__file__).parent.name
+        # 从 dlc_load.json 读取当前启用的 MOD 列表（Steam workshop id 对应目录名）
+        self.enabled_mod_ids = self._load_enabled_mod_ids_from_dlc_load()
 
         self.LONG_TREE_THRESHOLD = 100
         self.overlong_tech_ids = set()
@@ -104,99 +107,97 @@ class TechTreeGenerator:
     # 从 config.ini 读取：
     # - 游戏本体路径 base_game_path
     # - MOD 根目录路径 mod_folder_path
-    # - 可选的MOD过滤策略（白名单/黑名单/关闭）
-    # - 可选的“汉化集中化”MOD列表（这些MOD的中文描述将不再从其它MOD重复读取）
+    # 其余过滤/汉化集中化配置已废弃，统一使用 dlc_load.json 的 enabled_mods 自动识别
         config = configparser.ConfigParser()
         config.read(config_path, encoding='utf-8')
         
         try:
             base_path = config.get('paths', 'base_game_path')
             mod_path = config.get('paths', 'mod_folder_path')
+            dlc_path_cfg = config.get('paths', 'dlc_load_path', fallback='').strip()
+            # 可选集中汉化 MOD 列表
+            centralized_str = ''
+            if config.has_section('chinese_localization'):
+                centralized_str = config.get('chinese_localization', 'centralized_mods', fallback='').strip()
         except (configparser.NoSectionError, configparser.NoOptionError) as e:
             raise ValueError(f"配置文件缺少必需的配置项: {e}")
-        
-        mod_filter_settings = {'enable_filter': False, 'ignored_mods': set(), 'included_mods': set()}
-        
-        if config.has_section('mod_filter'):
-            mod_filter_settings['enable_filter'] = config.getboolean('mod_filter', 'enable_mod_filter', fallback=False)
-            
-            ignored_str = config.get('mod_filter', 'ignored_mods', fallback='').strip()
-            if ignored_str:
-                mod_filter_settings['ignored_mods'] = {mod.strip() for mod in ignored_str.split(',') if mod.strip()}
-            
-            included_str = config.get('mod_filter', 'included_mods', fallback='').strip()
-            if included_str:
-                mod_filter_settings['included_mods'] = {mod.strip() for mod in included_str.split(',') if mod.strip()}
-        
-        localization_mod_list = []
-        if config.has_section('chinese_localization'):
-            centralized_str = config.get('chinese_localization', 'centralized_mods', fallback='').strip()
-            if centralized_str:
-                localization_mod_list = [mod.strip() for mod in centralized_str.split(',') if mod.strip()]
-        
-        return base_path, mod_path, mod_filter_settings, localization_mod_list
-    
-    def _should_include_mod(self, mod_id: str) -> bool:
-    # 判定是否扫描某个MOD：
-    # - 当前生成器所在的MOD自身不参与扫描（避免自举干扰）
-    # - 启用过滤时，若配置了白名单，则仅白名单通过；否则若配置黑名单，则黑名单排除；都未配置则全部通过
-        if mod_id == self.current_mod_folder_name:
-            return False
-            
-        if not self.mod_filter_settings['enable_filter']:
-            return True
-        
-        if self.mod_filter_settings['included_mods']:
-            return mod_id in self.mod_filter_settings['included_mods']
-        
-        if self.mod_filter_settings['ignored_mods']:
-            return mod_id not in self.mod_filter_settings['ignored_mods']
-        
-        return True
-    
-    def _should_scan_mod_localization(self, mod_id: str) -> bool:
-    # 若某MOD在“汉化集中化”列表中，则不扫描其本地化
-        if mod_id in self.localization_mod_list:
-            return False
-            
-        return self._should_include_mod(mod_id)
-    
-    def _display_mod_filter_info(self):
-        if self.mod_filter_settings['enable_filter']:
-            print("MOD过滤: 已启用")
-            if self.mod_filter_settings['included_mods']:
-                print(f"  仅扫描MOD: {', '.join(sorted(self.mod_filter_settings['included_mods']))}")
-            elif self.mod_filter_settings['ignored_mods']:
-                print(f"  忽略MOD: {', '.join(sorted(self.mod_filter_settings['ignored_mods']))}")
+        # 若未配置，自行推断（Windows 默认用户文档路径）；其它平台提示需要配置
+        if not dlc_path_cfg:
+            if os.name == 'nt':
+                dlc_path = str(Path.home() / 'Documents' / 'Paradox Interactive' / 'Stellaris' / 'dlc_load.json')
+            else:
+                print("提示: 非 Windows 系统且未在 config.ini 中设置 dlc_load_path, 请手动配置该路径。")
+                dlc_path = ''
         else:
-            print("MOD过滤: 未启用")
-        
-        if self.localization_mod_list:
-            print(f"已配置汉化MOD: {', '.join(self.localization_mod_list)}")
-        else:
-            print("汉化MOD: 未配置")
+            dlc_path = dlc_path_cfg
+        localization_mod_list: List[str] = []
+        if centralized_str:
+            localization_mod_list = [m.strip() for m in centralized_str.split(',') if m.strip()]
+        if localization_mod_list:
+            # 不再输出具体MOD ID，仅提示已配置
+            print(f"汉化优先MOD数量: {len(localization_mod_list)}")
+        return base_path, mod_path, dlc_path, localization_mod_list
+
+    def _load_enabled_mod_ids_from_dlc_load(self) -> List[str]:
+        # Paradox 启用的 mod 列表在用户文档目录 dlc_load.json 中，形如 "mod/ugc_123456789.mod"
+        # 需要取出数字 ID，然后在 workshop 目录下找到对应文件夹（目录名即数字 ID）
+        # Windows 上路径示例： C:/Users/<User>/Documents/Paradox Interactive/Stellaris/dlc_load.json
+        try:
+            if self.dlc_load_json_path:
+                dlc_json_path = Path(self.dlc_load_json_path)
+            else:
+                # 没有可用路径直接返回空
+                return []
+            if not dlc_json_path.exists():
+                print(f"警告: 找不到 dlc_load.json: {dlc_json_path}")
+                return []
+            data = json.loads(dlc_json_path.read_text(encoding='utf-8'))
+            enabled = data.get('enabled_mods', [])
+            mod_ids: List[str] = []
+            for entry in enabled:
+                # 形如 mod/ugc_1995601384.mod
+                name = Path(entry).name  # ugc_1995601384.mod
+                if name.startswith('ugc_') and name.endswith('.mod'):
+                    num_part = name[len('ugc_'):-len('.mod')]
+                    if num_part.isdigit():
+                        mod_ids.append(num_part)
+            # 不输出具体启用 MOD ID 列表，仅打印数量
+            print(f"启用MOD数量: {len(mod_ids)}")
+            return mod_ids
+        except Exception as e:
+            print(f"警告: 读取 dlc_load.json 失败: {e}")
+            return []
+    
+    # 以下旧的过滤与集中汉化逻辑已移除：统一根据 dlc_load.json 中 enabled_mods 决定扫描集合
         
     def scan_all_technology_files(self):
     # 扫描顺序：先本体，再MOD；用于随后统计“本体/非本体”的科技数量
-        self._display_mod_filter_info()
-        
         self._scan_technology_path(Path(self.base_game_path) / "common" / "technology", "游戏本体科技文件")
         self.base_game_tech_ids = set(self.all_technologies.keys())
         
         mod_folder = Path(self.mod_folder_path)
         if mod_folder.exists():
             scanned_count = 0
-            
-            for mod_dir in mod_folder.iterdir():
-                if mod_dir.is_dir():
-                    mod_id = mod_dir.name
-                    
-                    if self._should_include_mod(mod_id):
-                        mod_tech_path = mod_dir / "common" / "technology"
-                        if mod_tech_path.exists():
-                            new_techs = self._scan_technology_path(mod_tech_path, f"MOD科技文件 {mod_id}")
-                            if new_techs > 0:
-                                scanned_count += 1
+            missing_mod_dirs: List[str] = []           # dlc_load中有，但目录不存在
+            missing_tech_dirs: List[str] = []          # 目录存在，但没有 common/technology
+            for mod_id in self.enabled_mod_ids:
+                if mod_id == self.current_mod_folder_name:
+                    continue
+                mod_dir = mod_folder / mod_id
+                if not mod_dir.is_dir():
+                    missing_mod_dirs.append(mod_id)
+                    continue
+                mod_tech_path = mod_dir / "common" / "technology"
+                if not mod_tech_path.exists():
+                    missing_tech_dirs.append(mod_id)
+                    continue
+                new_techs = self._scan_technology_path(mod_tech_path, f"MOD科技文件 {mod_id}")
+                if new_techs > 0:
+                    scanned_count += 1
+
+            if missing_mod_dirs:
+                print(f"提示: 有 {len(missing_mod_dirs)} 个启用MOD目录缺失")
+            print(f"提示: 有 {scanned_count} 个启用MOD有新增科技")
         
     def _scan_technology_path(self, path: Path, description: str) -> int:
         if not path.exists():
@@ -313,14 +314,17 @@ class TechTreeGenerator:
         
         mod_folder = Path(self.mod_folder_path)
         if mod_folder.exists():
-            for mod_dir in mod_folder.iterdir():
-                if mod_dir.is_dir() and self._should_include_mod(mod_dir.name):
+            for mod_id in self.enabled_mod_ids:
+                if mod_id == self.current_mod_folder_name:
+                    continue
+                mod_dir = mod_folder / mod_id
+                if mod_dir.is_dir():
                     mod_localisation_path = mod_dir / "localisation"
                     if mod_localisation_path.exists():
                         self._scan_mod_english_localization_files(mod_localisation_path)
 
     def _scan_chinese_tech_descriptions(self):
-    # 中文描述的优先级：本体 -> 配置的集中汉化MOD -> 其余MOD（受过滤规则影响）
+    # 中文描述的优先级：本体 -> 配置的集中汉化MOD(与启用列表求交集) -> 其余启用MOD
         found_chinese_descriptions = {}
         
         base_localisation_path = Path(self.base_game_path) / "localisation"
@@ -335,22 +339,31 @@ class TechTreeGenerator:
         
         mod_folder = Path(self.mod_folder_path)
         if mod_folder.exists():
-            if self.localization_mod_list:
-                for localization_mod_id in self.localization_mod_list:
-                    localization_mod_path = mod_folder / localization_mod_id
-                    if localization_mod_path.exists():
-                        if self._should_include_mod(localization_mod_id):
-                            self._scan_chinese_localization_files(localization_mod_path / "localisation", found_chinese_descriptions)
-                        else:
-                            print(f"信息：汉化MOD已配置但被过滤规则排除: {localization_mod_id}")
-                    else:
-                        print(f"警告：配置的汉化MOD不存在: {localization_mod_id}")
-
-            for mod_dir in mod_folder.iterdir():
-                if mod_dir.is_dir() and self._should_scan_mod_localization(mod_dir.name):
-                    mod_localisation_path = mod_dir / "localisation"
-                    if mod_localisation_path.exists():
-                        self._scan_chinese_localization_files(mod_localisation_path, found_chinese_descriptions)
+            # 1) 集中汉化优先
+            prioritized = []
+            if hasattr(self, 'localization_mod_list') and self.localization_mod_list:
+                prioritized = [m for m in self.localization_mod_list if m in self.enabled_mod_ids]
+            scanned_set = set()
+            for mod_id in prioritized:
+                if mod_id == self.current_mod_folder_name:
+                    continue
+                mod_dir = mod_folder / mod_id
+                if mod_dir.is_dir():
+                    loc_path = mod_dir / 'localisation'
+                    if loc_path.exists():
+                        self._scan_chinese_localization_files(loc_path, found_chinese_descriptions)
+                        scanned_set.add(mod_id)
+            # 2) 其余启用 MOD
+            for mod_id in self.enabled_mod_ids:
+                if mod_id in scanned_set or mod_id in prioritized:
+                    continue
+                if mod_id == self.current_mod_folder_name:
+                    continue
+                mod_dir = mod_folder / mod_id
+                if mod_dir.is_dir():
+                    loc_path = mod_dir / 'localisation'
+                    if loc_path.exists():
+                        self._scan_chinese_localization_files(loc_path, found_chinese_descriptions)
 
     def _scan_mod_english_localization_files(self, localisation_path: Path):
         try:
