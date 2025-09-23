@@ -15,9 +15,12 @@ def main() -> None:
 
     config_path = os.path.join(application_path, "config.ini")
 
+    try:
+        os.chdir(application_path)
+    except OSError:
+        pass
+
     def _early_lang() -> str:
-        """Attempt to read language from config.ini before full generator init.
-        Fallback order: value in file -> simp_chinese -> english."""
         cfg = configparser.ConfigParser()
         try:
             if Path(config_path).exists():
@@ -26,7 +29,6 @@ def main() -> None:
                     lang = cfg.get('localization', 'language').strip()
                     if lang and lang in LOCALIZATION_STRINGS:
                         return lang
-            # fallback chain
             if 'simp_chinese' in LOCALIZATION_STRINGS:
                 return 'simp_chinese'
             return 'english'

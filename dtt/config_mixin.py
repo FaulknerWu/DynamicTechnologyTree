@@ -14,11 +14,10 @@ class ConfigAndLocalizationMixin:
         config.read(config_path, encoding='utf-8')
         try:
             base_path = config.get('paths', 'base_game_path')
-            workshop_mod_path = config.get('paths', 'mod_folder_path')  # existing key for workshop mods
+            workshop_mod_path = config.get('paths', 'mod_folder_path')
             local_mod_path = config.get('paths', 'local_mod_folder_path', fallback='').strip()
             dlc_path_cfg = config.get('paths', 'dlc_load_path', fallback='').strip()
         except (configparser.NoSectionError, configparser.NoOptionError) as e:
-            # At this point language_code not yet known, so fallback english lookup
             fallback_lang = 'english'
             msg_template = LOCALIZATION_STRINGS.get(fallback_lang, {}).get(
                 'error_missing_required_entries',
@@ -29,8 +28,6 @@ class ConfigAndLocalizationMixin:
             if os.name == 'nt':
                 dlc_path = str(Path.home() / 'Documents' / 'Paradox Interactive' / 'Stellaris' / 'dlc_load.json')
             else:
-                # Fallback language not yet known here (language_code parsed later). Use english neutral message key.
-                # We cannot use self._l yet (target_language_code not set); keep english string consistent with localization key.
                 print(LOCALIZATION_STRINGS['english'].get('hint_missing_dlc_path_non_windows'))
                 dlc_path = ''
         else:
@@ -43,13 +40,11 @@ class ConfigAndLocalizationMixin:
             )
             raise ValueError(msg_template)
         language_code = config.get('localization', 'language', fallback='simp_chinese').strip() or 'simp_chinese'
-        # Fallback: if language not provided or not in localization map, use english
         if language_code not in LOCALIZATION_STRINGS:
             language_code = 'english'
         priority_mods_str = config.get('localization', 'priority_mods', fallback='').strip()
         priority_mods: List[str] = [m.strip() for m in priority_mods_str.split(',') if m.strip()]
         if priority_mods:
-            # Cannot yet call self._l (target_language_code not set). Print english version directly.
             print(LOCALIZATION_STRINGS['english'].get('msg_priority_localization_mods', 'Priority localization MODs: {count}').format(count=len(priority_mods)))
         max_children_per_node = 0
         max_tree_depth = 0
@@ -105,7 +100,6 @@ class ConfigAndLocalizationMixin:
                         workshop_ids.append(num_part)
                         seen_w.add(num_part)
                 else:
-                    # local .mod descriptor
                     descriptor_path = local_root_path / name
                     local_dir_name = ''
                     try:

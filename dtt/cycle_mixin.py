@@ -48,7 +48,6 @@ class CycleMixin:
             if self_loops:
                 print(self._l("msg_self_loops_header", count=len(self_loops)))
                 for tech in self_loops:
-                    # Localized self-loop entry
                     print(self._l("msg_self_loop_entry", tech=tech))
             if complex_cycles:
                 print(self._l("msg_complex_loops_header", count=len(complex_cycles)))

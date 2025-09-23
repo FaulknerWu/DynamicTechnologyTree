@@ -3,11 +3,10 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .models import Technology
-from .localization import LOCALIZATION_STRINGS  # may be used in future extensions
+from .localization import LOCALIZATION_STRINGS
 
 
 class ParserMixin:
-    # Regex patterns (copied from original script)
     TECH_DEFINITION_REGEX = re.compile(r'(?m)^(\w+)\s*=\s*\{')
     PREREQUISITES_REGEX = re.compile(r'prerequisites\s*=\s*\{')
     COST_REGEX = re.compile(r'cost\s*=\s*([@\w\d]+)')
@@ -27,7 +26,6 @@ class ParserMixin:
         self._scan_technology_path(Path(self.base_game_path) / "common" / "technology")
         self.base_game_tech_ids = set(self.all_technologies.keys())
 
-        # Scan workshop mods
         workshop_root = Path(self.mod_folder_path)
         local_root = Path(self.local_mod_folder_path) if getattr(self, 'local_mod_folder_path', '') else None
         scanned_count = 0
@@ -53,7 +51,6 @@ class ParserMixin:
                 if new_techs > 0:
                     scanned_count += 1
 
-        # Attributes set in configuration loader
         workshop_ids = getattr(self, 'workshop_mod_ids', [])
         local_ids = getattr(self, 'local_mod_ids', [])
         scan_root(workshop_root, workshop_ids)
@@ -137,7 +134,6 @@ class ParserMixin:
         tech.is_dangerous_tech = tech.is_dangerous_tech or bool(self.DANGEROUS_TECH_REGEX.search(content))
         tech.is_repeatable_tech = tech.is_repeatable_tech or bool(self.REPEATABLE_TECH_REGEX.search(content))
 
-    # Description scanning
     def scan_all_tech_descriptions(self):
         self._scan_language_descriptions(self.target_language_code)
 
@@ -186,9 +182,7 @@ class ParserMixin:
                         except Exception:
                             pass
 
-        # First the remaining workshop mods
         scan_loc(mod_folder, getattr(self, 'workshop_mod_ids', []))
-        # Then local mods
         scan_loc(local_mod_folder, getattr(self, 'local_mod_ids', []))
 
     def _parse_description_file_generic(self, filepath: Path, lang_code: str, found_tracker: Optional[dict]):
