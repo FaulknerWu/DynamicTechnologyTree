@@ -1,3 +1,4 @@
 localisation/
 output/
+dtt/__pycache__
 generate_tech_tree.exe
