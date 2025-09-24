@@ -1,4 +1,4 @@
-from typing import List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .models import Technology
 from .localization import RESEARCH_AREA_ICONS, LOCALIZATION_STRINGS
@@ -8,7 +8,8 @@ class RenderMixin:
     MAX_PREREQ_DISPLAY = 2
     ELLIPSIS = "…"
 
-    def _format_single_tech(self, tech: Technology) -> str:
+    def _format_single_tech(self, tech: Technology, display_id: Optional[str] = None) -> str:
+        display_id = display_id or tech.tech_id
         area_icon = RESEARCH_AREA_ICONS.get(tech.research_area, "")
         if tech.is_dangerous_tech:
             color = '§R'
@@ -16,23 +17,25 @@ class RenderMixin:
             color = '§M'
         else:
             color = '§W'
-        return f"({tech.tier_level})['technology:{tech.tech_id}', {area_icon}{color}${tech.tech_id}$§!]"
+        return f"({tech.tier_level})['technology:{tech.tech_id}', {area_icon}{color}${display_id}$§!]"
 
-    def _format_tech_tree_entry(self, tech_id: str, prefix_bars: list[bool], current_prereq: str = None, lang_code: str = "simp_chinese", collapsed: bool = False, is_last: bool = False) -> str:
+    def _format_tech_tree_entry(self, tech_id: str, prefix_bars: list[bool], current_prereq: str = None, lang_code: str = "simp_chinese", display_overrides: Optional[Dict[str, str]] = None, collapsed: bool = False, is_last: bool = False) -> str:
         if tech_id not in self.all_technologies:
             return ""
         tech = self.all_technologies[tech_id]
+        display_id = display_overrides.get(tech_id, tech_id) if display_overrides else tech_id
         prefix_parts = ["│   " if keep else "    " for keep in prefix_bars[:-1]] if prefix_bars else []
         branch_symbol = "└─" if is_last else "├─"
         line_prefix = "".join(prefix_parts) + branch_symbol
-        formatted = self._format_single_tech(tech)
+        formatted = self._format_single_tech(tech, display_id)
         additional_prereqs = []
         if current_prereq and len(tech.prerequisite_tech_ids) > 1:
             for prereq_id in tech.prerequisite_tech_ids:
                 if prereq_id == current_prereq or prereq_id not in self.all_technologies:
                     continue
                 prereq_tech = self.all_technologies[prereq_id]
-                additional_prereqs.append(self._format_single_tech(prereq_tech))
+                display_prereq_id = display_overrides.get(prereq_id, prereq_id) if display_overrides else prereq_id
+                additional_prereqs.append(self._format_single_tech(prereq_tech, display_prereq_id))
         prereq_suffix = ""
         if additional_prereqs:
             requires_text = LOCALIZATION_STRINGS.get(lang_code, LOCALIZATION_STRINGS['english']).get("requires", "Requires")
@@ -177,7 +180,7 @@ class RenderMixin:
             for cid in children:
                 stack.append((cid, d + 1))
         return len(local_seen)
-    def _render_tree_with_limits(self, root_id: str, x: int, y: int, T: int, lang_code: str, suppress_overflow_line: bool = False):
+    def _render_tree_with_limits(self, root_id: str, x: int, y: int, T: int, lang_code: str, display_overrides: Optional[Dict[str, str]] = None, suppress_overflow_line: bool = False):
         from .models import Technology
         if root_id not in self.all_technologies:
             return [], False
@@ -213,7 +216,7 @@ class RenderMixin:
                         lines.append("".join(prefix_parts) + "└─" + self.ELLIPSIS + global_overflow_tpl.format(count=more))
                     break
                 has_more_siblings = (idx < len(display_children) - 1) or (truncated and not overflow)
-                line = self._format_tech_tree_entry(cid, prefix_bars + [has_more_siblings], parent_id, lang_code, is_last=not has_more_siblings)
+                line = self._format_tech_tree_entry(cid, prefix_bars + [has_more_siblings], parent_id, lang_code, display_overrides=display_overrides, is_last=not has_more_siblings)
                 if not line:
                     continue
                 duplicate = cid in visited_unique
@@ -239,7 +242,7 @@ class RenderMixin:
         render_children(root_id, root_children, 0, True, [])
         return lines, overflow
 
-    def generate_tech_tree_content(self, tech_id: str, lang_code: str = "simp_chinese") -> str:
+    def generate_tech_tree_content(self, tech_id: str, lang_code: str = "simp_chinese", display_overrides: Optional[Dict[str, str]] = None) -> str:
         if tech_id not in self.all_technologies:
             return ""
         header = "\\n\\n§H$technology_tree_title$§!"
@@ -260,10 +263,10 @@ class RenderMixin:
         if raw_x <= 0:
             raw_x = 1
         raw_y = self.max_children_per_node
-        lines_stage_probe, overflow_stage_probe = self._render_tree_with_limits(tech_id, raw_x, raw_y, T, lang_code, suppress_overflow_line=True)
+        lines_stage_probe, overflow_stage_probe = self._render_tree_with_limits(tech_id, raw_x, raw_y, T, lang_code, display_overrides=display_overrides, suppress_overflow_line=True)
 
         if not overflow_stage_probe or T == 0:
-            lines_stage_final, _ = self._render_tree_with_limits(tech_id, raw_x, raw_y, T, lang_code, suppress_overflow_line=False)
+            lines_stage_final, _ = self._render_tree_with_limits(tech_id, raw_x, raw_y, T, lang_code, display_overrides=display_overrides, suppress_overflow_line=False)
             if not lines_stage_final:
                 content = f"{header}\n§Y$tech_tree_max_level$§!"
             else:
@@ -276,7 +279,7 @@ class RenderMixin:
             content = f"{header}\n└─§R{msg}§!"
             return content.replace("\n", "\\n")
         best_x, best_y, _ = chosen
-        lines_stage_final, overflow_final = self._render_tree_with_limits(tech_id, best_x, best_y, T, lang_code, suppress_overflow_line=False)
+        lines_stage_final, overflow_final = self._render_tree_with_limits(tech_id, best_x, best_y, T, lang_code, display_overrides=display_overrides, suppress_overflow_line=False)
         if not lines_stage_final:
             content = f"{header}\n§Y$tech_tree_max_level$§!"
         else:
