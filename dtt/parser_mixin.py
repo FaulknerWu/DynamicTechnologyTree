@@ -14,12 +14,15 @@ class ParserMixin:
     POTENTIAL_REGEX = re.compile(r'(?:potential|starting_potential)\s*=\s*\{')
     DANGEROUS_TECH_REGEX = re.compile(r'is_dangerous\s*=\s*yes')
     REPEATABLE_TECH_REGEX = re.compile(r'is_repeatable\s*=\s*yes')
+    TECH_SWAP_REGEX = re.compile(r'technology_swap\s*=\s*\{')
+    SWAP_NAME_REGEX = re.compile(r'name\s*=\s*(?:"([^"\n]+)"|([@\w\.]+))')
+    SWAP_TRIGGER_REGEX = re.compile(r'trigger\s*=\s*\{')
     RESEARCH_AREA_REGEX = re.compile(r'area\s*=\s*(\w+)')
     TIER_REGEX = re.compile(r'tier\s*=\s*(\d+)')
     STARTING_TECH_REGEX = re.compile(r'start_tech\s*=\s*yes')
     TECH_ID_REGEX = re.compile(r'"([^"]+)"|(\w+)')
     WORD_REGEX = re.compile(r'[\w_]+')
-    DESCRIPTION_LOCALIZATION_REGEX = re.compile(r'^\s*([a-zA-Z0-9_]+_desc):(?:\d+)?\s*"([^"]*(?:\\.[^"]*)*)"', re.IGNORECASE)
+    DESCRIPTION_LOCALIZATION_REGEX = re.compile(r'^\s*([a-zA-Z0-9_]+_desc(?:_[a-zA-Z0-9_]+)*):(?:\d+)?\s*"([^"]*(?:\\.[^"]*)*)"', re.IGNORECASE)
     WHITESPACE_CLEANUP_REGEX = re.compile(r'\s+')
 
     def scan_all_technology_files(self):
@@ -112,6 +115,56 @@ class ParserMixin:
                     return content[start_pos:i]
         return ""
 
+    def _parse_variant_swaps(self, tech: Technology, content: str) -> None:
+        triggers = getattr(self, 'variant_triggers', [])
+        if not triggers:
+            return
+        compiled_patterns = {
+            trigger: re.compile(rf"\b{re.escape(trigger)}\b\s*=\s*(?:yes|1)", re.IGNORECASE)
+            for trigger in triggers
+        }
+        search_pos = 0
+        while True:
+            match = self.TECH_SWAP_REGEX.search(content, search_pos)
+            if not match:
+                break
+            brace_index = content.find('{', match.start())
+            if brace_index == -1:
+                break
+            block = self._extract_braced_block(content, brace_index + 1)
+            if not block:
+                search_pos = brace_index + 1
+                continue
+            name_match = self.SWAP_NAME_REGEX.search(block)
+            if not name_match:
+                search_pos = brace_index + len(block) + 1
+                continue
+            swap_name = name_match.group(1) or name_match.group(2)
+            trigger_match = self.SWAP_TRIGGER_REGEX.search(block)
+            trigger_block = ''
+            if trigger_match:
+                trig_brace_index = block.find('{', trigger_match.start())
+                if trig_brace_index != -1:
+                    trigger_block = self._extract_braced_block(block, trig_brace_index + 1)
+            if not trigger_block or not swap_name:
+                search_pos = brace_index + len(block) + 1
+                continue
+            for trigger, pattern in compiled_patterns.items():
+                if trigger in tech.variants:
+                    continue
+                if pattern.search(trigger_block):
+                    tech.variants[trigger] = swap_name
+                    if swap_name:
+                        variant_ids = getattr(self, 'variant_tech_ids', None)
+                        if variant_ids is None:
+                            variant_ids = set()
+                            setattr(self, 'variant_tech_ids', variant_ids)
+                        variant_ids.add(swap_name)
+                        trigger_overrides = getattr(self, 'variant_trigger_overrides', None)
+                        if trigger_overrides is not None:
+                            trigger_overrides.setdefault(trigger, {})[tech.tech_id] = swap_name
+            search_pos = brace_index + len(block) + 1
+
     def _parse_tech_block_content(self, tech: Technology, content: str):
         if area_match := self.RESEARCH_AREA_REGEX.search(content):
             tech.research_area = area_match.group(1)
@@ -133,6 +186,7 @@ class ParserMixin:
             tech.unlock_conditions = [p for p in self.WORD_REGEX.findall(pot_block)]
         tech.is_dangerous_tech = tech.is_dangerous_tech or bool(self.DANGEROUS_TECH_REGEX.search(content))
         tech.is_repeatable_tech = tech.is_repeatable_tech or bool(self.REPEATABLE_TECH_REGEX.search(content))
+        self._parse_variant_swaps(tech, content)
 
     def scan_all_tech_descriptions(self):
         self._scan_language_descriptions(self.target_language_code)
@@ -189,6 +243,9 @@ class ParserMixin:
         content = self._read_file_with_encoding(filepath)
         if not content:
             return
+        polity_suffixes = getattr(self, 'polity_description_suffixes', [])
+        variant_set = getattr(self, 'variant_tech_ids', None)
+        polity_variant_map = getattr(self, 'polity_variant_map', None)
         for line in content.splitlines():
             line = line.strip()
             if not line or line.startswith('#'):
@@ -198,15 +255,36 @@ class ParserMixin:
                 continue
             desc_key = match.group(1)
             description = self._clean_description_text(match.group(2))
-            tech_id = desc_key.replace('_desc', '')
-            if tech_id in self.all_technologies:
-                if found_tracker is not None and tech_id in found_tracker:
+            base_tech_id = ''
+            suffix_label = None
+            for suffix in polity_suffixes:
+                suffix_token = f'_desc_{suffix}'
+                if desc_key.endswith(suffix_token):
+                    base_tech_id = desc_key[:-len(suffix_token)]
+                    suffix_label = suffix
+                    break
+            if not base_tech_id:
+                if desc_key.endswith('_desc'):
+                    base_tech_id = desc_key[:-len('_desc')]
+                else:
                     continue
-                if tech_id not in self.tech_descriptions:
-                    self.tech_descriptions[tech_id] = {}
-                self.tech_descriptions[tech_id][lang_code] = description
-                if found_tracker is not None:
-                    found_tracker[tech_id] = True
+            if not base_tech_id:
+                continue
+            target_tech_id = base_tech_id if suffix_label is None else f"{base_tech_id}_{suffix_label}"
+            if base_tech_id not in self.all_technologies:
+                if variant_set is None or target_tech_id not in variant_set:
+                    continue
+            if found_tracker is not None and target_tech_id in found_tracker:
+                continue
+            if target_tech_id not in self.tech_descriptions:
+                self.tech_descriptions[target_tech_id] = {}
+            self.tech_descriptions[target_tech_id][lang_code] = description
+            if found_tracker is not None:
+                found_tracker[target_tech_id] = True
+            if variant_set is not None:
+                variant_set.add(target_tech_id)
+            if suffix_label and polity_variant_map is not None:
+                polity_variant_map.setdefault(base_tech_id, set()).add(target_tech_id)
 
     def _clean_description_text(self, description: str) -> str:
         description = description.replace('\\"', '"').replace('\\n', ' ').replace('\\t', ' ')
