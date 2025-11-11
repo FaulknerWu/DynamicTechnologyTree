@@ -1,5 +1,5 @@
 ﻿from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -15,6 +15,15 @@ class Technology:
     tech_categories: List[str] = field(default_factory=list)
     unlock_conditions: List[str] = field(default_factory=list)
     variants: Dict[str, str] = field(default_factory=dict)
+    levels: Optional[int] = None
+    cost_per_level: str = ""
+    weight: str = ""
+    weight_groups: List[str] = field(default_factory=list)
+    mod_weight_if_group_picked: Dict[str, str] = field(default_factory=dict)
+    weight_modifier_script: str = ""
+    ai_weight_script: str = ""
+    gateway: str = ""
+    feature_flags: List[str] = field(default_factory=list)
 
     def __post_init__(self):
         dangerous_tech_list = {

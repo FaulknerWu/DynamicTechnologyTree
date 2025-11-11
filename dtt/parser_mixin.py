@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from .models import Technology
 from .localization import LOCALIZATION_STRINGS
@@ -24,6 +24,48 @@ class ParserMixin:
     WORD_REGEX = re.compile(r'[\w_]+')
     DESCRIPTION_LOCALIZATION_REGEX = re.compile(r'^\s*([a-zA-Z0-9_]+_desc(?:_[a-zA-Z0-9_]+)*):(?:\d+)?\s*"([^"]*(?:\\.[^"]*)*)"', re.IGNORECASE)
     WHITESPACE_CLEANUP_REGEX = re.compile(r'\s+')
+    LEVELS_REGEX = re.compile(r'levels\s*=\s*(-?\d+)')
+    COST_PER_LEVEL_REGEX = re.compile(r'cost_per_level\s*=\s*([@\w\.\-]+)')
+    WEIGHT_REGEX = re.compile(r'\bweight\s*=\s*([@\w\.\-]+)')
+    GATEWAY_REGEX = re.compile(r'\bgateway\s*=\s*(?:"([^"\n]+)"|([@\w\.]+))')
+    FEATURE_FLAGS_REGEX = re.compile(r'feature_flags\s*=\s*\{')
+    WEIGHT_GROUPS_REGEX = re.compile(r'weight_groups\s*=\s*\{')
+    MOD_WEIGHT_GROUP_REGEX = re.compile(r'mod_weight_if_group_picked\s*=\s*\{')
+    WEIGHT_MODIFIER_REGEX = re.compile(r'weight_modifier\s*=\s*\{')
+    AI_WEIGHT_REGEX = re.compile(r'ai_weight\s*=\s*\{')
+
+    def _collect_mod_subdirs(
+        self,
+        mod_ids: List[str],
+        root: Optional[Path],
+        subpath: Tuple[str, ...],
+        *,
+        skip_current: bool = True,
+        skip_ids: Optional[Set[str]] = None,
+    ) -> Tuple[List[Tuple[str, Path]], List[str], List[str]]:
+        existing: List[Tuple[str, Path]] = []
+        missing_mods: List[str] = []
+        missing_subdirs: List[str] = []
+        if not root or not root.exists():
+            return existing, missing_mods, missing_subdirs
+        skip_lookup = set(skip_ids or [])
+        for mod_id in mod_ids:
+            if skip_current and mod_id == self.current_mod_folder_name:
+                continue
+            if skip_lookup and mod_id in skip_lookup:
+                continue
+            mod_dir = root / mod_id
+            if not mod_dir.is_dir():
+                missing_mods.append(mod_id)
+                continue
+            target_dir = mod_dir
+            for part in subpath:
+                target_dir = target_dir / part
+            if not target_dir.exists():
+                missing_subdirs.append(mod_id)
+                continue
+            existing.append((mod_id, target_dir))
+        return existing, missing_mods, missing_subdirs
 
     def scan_all_technology_files(self):
         self._scan_technology_path(Path(self.base_game_path) / "common" / "technology")
@@ -35,29 +77,20 @@ class ParserMixin:
         missing_mod_dirs: List[str] = []
         missing_tech_dirs: List[str] = []
 
-        def scan_root(root: Path, mod_ids: List[str]):
+        def process_mod_roots(mod_ids: List[str], root: Optional[Path]):
             nonlocal scanned_count
-            if not root or not root.exists():
-                return
-            for mod_id in mod_ids:
-                if mod_id == self.current_mod_folder_name:
-                    continue
-                mod_dir = root / mod_id
-                if not mod_dir.is_dir():
-                    missing_mod_dirs.append(mod_id)
-                    continue
-                tech_path = mod_dir / "common" / "technology"
-                if not tech_path.exists():
-                    missing_tech_dirs.append(mod_id)
-                    continue
+            paths, missing_mods, missing_subs = self._collect_mod_subdirs(mod_ids, root, ("common", "technology"))
+            missing_mod_dirs.extend(missing_mods)
+            missing_tech_dirs.extend(missing_subs)
+            for _, tech_path in paths:
                 new_techs = self._scan_technology_path(tech_path)
                 if new_techs > 0:
                     scanned_count += 1
 
         workshop_ids = getattr(self, 'workshop_mod_ids', [])
         local_ids = getattr(self, 'local_mod_ids', [])
-        scan_root(workshop_root, workshop_ids)
-        scan_root(local_root, local_ids)
+        process_mod_roots(workshop_ids, workshop_root)
+        process_mod_roots(local_ids, local_root)
         if missing_mod_dirs:
             print(self._l("msg_missing_mod_dirs", count=len(missing_mod_dirs)))
         print(self._l("msg_mods_with_new_techs", count=scanned_count))
@@ -184,6 +217,39 @@ class ParserMixin:
         if pot_m := self.POTENTIAL_REGEX.search(content):
             pot_block = self._extract_braced_block(content, pot_m.end())
             tech.unlock_conditions = [p for p in self.WORD_REGEX.findall(pot_block)]
+        if levels_match := self.LEVELS_REGEX.search(content):
+            try:
+                tech.levels = int(levels_match.group(1))
+            except ValueError:
+                tech.levels = None
+            if tech.levels == -1:
+                tech.is_repeatable_tech = True
+        if cpl_match := self.COST_PER_LEVEL_REGEX.search(content):
+            tech.cost_per_level = cpl_match.group(1)
+        if weight_match := self.WEIGHT_REGEX.search(content):
+            tech.weight = weight_match.group(1)
+        if gateway_match := self.GATEWAY_REGEX.search(content):
+            tech.gateway = gateway_match.group(1) or gateway_match.group(2) or ""
+        if wg_match := self.WEIGHT_GROUPS_REGEX.search(content):
+            wg_block = self._extract_braced_block(content, wg_match.end())
+            if wg_block:
+                tech.weight_groups = self.WORD_REGEX.findall(wg_block)
+        if mw_match := self.MOD_WEIGHT_GROUP_REGEX.search(content):
+            mw_block = self._extract_braced_block(content, mw_match.end())
+            if mw_block:
+                tech.mod_weight_if_group_picked = self._parse_simple_assignment_block(mw_block)
+        if ff_match := self.FEATURE_FLAGS_REGEX.search(content):
+            ff_block = self._extract_braced_block(content, ff_match.end())
+            if ff_block:
+                tech.feature_flags = self.WORD_REGEX.findall(ff_block)
+        if wm_match := self.WEIGHT_MODIFIER_REGEX.search(content):
+            wm_block = self._extract_braced_block(content, wm_match.end())
+            if wm_block:
+                tech.weight_modifier_script = self._clean_script_block(wm_block)
+        if ai_match := self.AI_WEIGHT_REGEX.search(content):
+            ai_block = self._extract_braced_block(content, ai_match.end())
+            if ai_block:
+                tech.ai_weight_script = self._clean_script_block(ai_block)
         tech.is_dangerous_tech = tech.is_dangerous_tech or bool(self.DANGEROUS_TECH_REGEX.search(content))
         tech.is_repeatable_tech = tech.is_repeatable_tech or bool(self.REPEATABLE_TECH_REGEX.search(content))
         self._parse_variant_swaps(tech, content)
@@ -204,40 +270,40 @@ class ParserMixin:
                     pass
         mod_folder = Path(self.mod_folder_path)
         local_mod_folder = Path(self.local_mod_folder_path) if getattr(self, 'local_mod_folder_path', '') else None
-        scanned_priority = set()
-        if mod_folder.exists() and self.priority_localization_mod_ids:
-            for mod_id in self.priority_localization_mod_ids:
-                if mod_id not in self.enabled_mod_ids:
-                    continue
-                if mod_id == self.current_mod_folder_name:
-                    continue
-                mod_dir = mod_folder / mod_id / 'localisation'
-                if mod_dir.exists():
-                    for yml_file in mod_dir.rglob(pattern):
-                        try:
-                            self._parse_description_file_generic(yml_file, lang_code, found_tracker)
-                        except Exception:
-                            pass
-                    scanned_priority.add(mod_id)
+        scanned_priority: Set[str] = set()
 
-        def scan_loc(root: Path, mod_ids: List[str]):
-            if not root or not root.exists():
-                return
-            for mod_id in mod_ids:
-                if mod_id in scanned_priority:
-                    continue
-                if mod_id == self.current_mod_folder_name:
-                    continue
-                mod_dir = root / mod_id / 'localisation'
-                if mod_dir.exists():
-                    for yml_file in mod_dir.rglob(pattern):
-                        try:
-                            self._parse_description_file_generic(yml_file, lang_code, found_tracker)
-                        except Exception:
-                            pass
+        def scan_localisation_dirs(paths: List[Tuple[str, Path]]):
+            for _, loc_dir in paths:
+                for yml_file in loc_dir.rglob(pattern):
+                    try:
+                        self._parse_description_file_generic(yml_file, lang_code, found_tracker)
+                    except Exception:
+                        pass
 
-        scan_loc(mod_folder, getattr(self, 'workshop_mod_ids', []))
-        scan_loc(local_mod_folder, getattr(self, 'local_mod_ids', []))
+        if self.priority_localization_mod_ids:
+            priority_ids = [
+                mod_id for mod_id in self.priority_localization_mod_ids
+                if mod_id in self.enabled_mod_ids
+            ]
+            priority_paths, _, _ = self._collect_mod_subdirs(priority_ids, mod_folder, ("localisation",))
+            scan_localisation_dirs(priority_paths)
+            scanned_priority.update(mod_id for mod_id, _ in priority_paths)
+
+        workshop_paths, _, _ = self._collect_mod_subdirs(
+            getattr(self, 'workshop_mod_ids', []),
+            mod_folder,
+            ("localisation",),
+            skip_ids=scanned_priority,
+        )
+        scan_localisation_dirs(workshop_paths)
+
+        local_paths, _, _ = self._collect_mod_subdirs(
+            getattr(self, 'local_mod_ids', []),
+            local_mod_folder,
+            ("localisation",),
+            skip_ids=scanned_priority,
+        )
+        scan_localisation_dirs(local_paths)
 
     def _parse_description_file_generic(self, filepath: Path, lang_code: str, found_tracker: Optional[dict]):
         content = self._read_file_with_encoding(filepath)
@@ -285,6 +351,31 @@ class ParserMixin:
                 variant_set.add(target_tech_id)
             if suffix_label and polity_variant_map is not None:
                 polity_variant_map.setdefault(base_tech_id, set()).add(target_tech_id)
+
+    def _parse_simple_assignment_block(self, block: str) -> Dict[str, str]:
+        assignments: Dict[str, str] = {}
+        for raw_line in block.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            assignments[key] = value
+        return assignments
+
+    def _clean_script_block(self, block: str) -> str:
+        parts = []
+        for raw_line in block.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts.append(line)
+        return ' '.join(parts)
 
     def _clean_description_text(self, description: str) -> str:
         description = description.replace('\\"', '"').replace('\\n', ' ').replace('\\t', ' ')

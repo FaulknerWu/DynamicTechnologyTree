@@ -4,5 +4,5 @@ tags={
 }
 name="Dynamic Technology Tree"
 picture="thumbnail.png"
-supported_version="v4.1.0.0"
+supported_version="v4.1.7"
 remote_file_id="3543267091"
