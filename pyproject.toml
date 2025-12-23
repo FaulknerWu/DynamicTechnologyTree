@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dynamic-technology-tree"
+version = "1.0.5"
+description = "Stellaris Dynamic Technology Tree Generator"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+keywords = ["stellaris", "mod", "technology", "tree"]
+dependencies = []
+
+[project.optional-dependencies]
+gui = ["PyQt6"]
+dev = ["pytest", "pytest-cov"]
+
+[project.scripts]
+dtt = "cli:main"
+dtt-gui = "gui:main"
+
+[tool.setuptools]
+package-dir = {"": "src"}
+py-modules = ["cli", "config", "generator", "localization", "models"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

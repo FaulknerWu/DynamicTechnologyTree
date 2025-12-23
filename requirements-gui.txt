@@ -1,0 +1,2 @@
+# GUI dependencies for Stellaris Tech Tree Generator
+PyQt6>=6.4.0

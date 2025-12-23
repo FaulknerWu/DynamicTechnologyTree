@@ -3,10 +3,13 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-
-from dtt import TechTreeGenerator
-from dtt.localization import LOCALIZATION_STRINGS
 import configparser
+
+SRC_DIR = Path(__file__).resolve().parent.parent / "src"
+sys.path.insert(0, str(SRC_DIR))
+
+from generator import TechTreeGenerator
+from localization import LOCALIZATION_STRINGS
 
 
 def main() -> None:

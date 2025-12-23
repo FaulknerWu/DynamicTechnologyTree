@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-from .models import Technology
-from .localization import RESEARCH_AREA_ICONS, LOCALIZATION_STRINGS
+from models import Technology
+from localization import RESEARCH_AREA_ICONS, LOCALIZATION_STRINGS
 
 
 @dataclass
@@ -122,7 +122,6 @@ class RenderMixin:
                         return
                     dfs(cid, depth + 1, False)
 
-        from .models import Technology
         dfs(root_id, 0, True)
         return len(visited)
 
@@ -188,7 +187,6 @@ class RenderMixin:
         for n in start_nodes:
             stack.append((n, current_depth + 1))
         local_seen: Set[str] = set()
-        from .models import Technology
         while stack:
             nid, d = stack.pop()
             if nid in visited_global or nid in local_seen:

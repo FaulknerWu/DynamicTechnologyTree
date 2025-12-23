@@ -1,5 +1,30 @@
-localisation/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+
+# Build
+dist/
+build/
+!build/
+build/*
+!build/*.spec
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Project specific
+config.ini
 .claude/
-output/
-dtt/__pycache__
-generate_tech_tree.exe
+
+# Generated output
+localisation/

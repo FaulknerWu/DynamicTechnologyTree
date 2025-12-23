@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from .localization import LOCALIZATION_STRINGS
-from .models import Technology
+from localization import LOCALIZATION_STRINGS
+from models import Technology
 
 
 @dataclass
@@ -119,7 +119,7 @@ class OutputMixin:
         return desc_key, variant_full_desc
 
     def _get_output_file_paths(self, lang_code: str, filename: str):
-        base = Path("output/localisation/")
+        base = Path("localisation")
         candidates = [
             base / filename,
             base / lang_code / filename,
@@ -210,7 +210,7 @@ class OutputMixin:
                 print(self._l("warn_write_file_failed", file=file_path, error=e))
 
     def generate_all_yml_files(self):
-        output_dir = Path("output/localisation")
+        output_dir = Path("localisation")
         output_dir.mkdir(parents=True, exist_ok=True)
         lang_code = self.config.localization.target_language_code
         self._generate_localization_files_for_language(lang_code, self.config.target_lang_key)

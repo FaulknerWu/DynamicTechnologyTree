@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import List
 import re
 
-from .localization import LOCALIZATION_STRINGS
-from .config import (
+from localization import LOCALIZATION_STRINGS
+from config import (
     DisplayConfig,
     EnabledModIds,
     GeneratorConfig,

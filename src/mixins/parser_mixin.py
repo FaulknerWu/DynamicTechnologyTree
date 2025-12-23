@@ -2,8 +2,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from .models import Technology
-from .localization import LOCALIZATION_STRINGS
+from models import Technology
+from localization import LOCALIZATION_STRINGS
 
 
 class ParserMixin:

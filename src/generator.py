@@ -3,16 +3,16 @@ import sys
 from pathlib import Path
 from typing import Dict, Set
 
-from .models import Technology
-from .config import EnabledModIds, GeneratorConfig
-from .config_mixin import ConfigAndLocalizationMixin
-from .parser_mixin import ParserMixin
-from .render_mixin import RenderMixin
-from .cycle_mixin import CycleMixin
-from .stats_mixin import StatsMixin
-from .output_mixin import OutputMixin
-from .relations_mixin import RelationsMixin
-from .localization import LOCALIZATION_STRINGS
+from models import Technology
+from config import EnabledModIds, GeneratorConfig
+from mixins.config_mixin import ConfigAndLocalizationMixin
+from mixins.parser_mixin import ParserMixin
+from mixins.render_mixin import RenderMixin
+from mixins.cycle_mixin import CycleMixin
+from mixins.stats_mixin import StatsMixin
+from mixins.output_mixin import OutputMixin
+from mixins.relations_mixin import RelationsMixin
+from localization import LOCALIZATION_STRINGS
 
 
 class TechTreeGenerator(ConfigAndLocalizationMixin, ParserMixin, RenderMixin, CycleMixin, StatsMixin, OutputMixin, RelationsMixin):
@@ -24,7 +24,7 @@ class TechTreeGenerator(ConfigAndLocalizationMixin, ParserMixin, RenderMixin, Cy
         self.variant_trigger_overrides: Dict[str, Dict[str, str]] = {}
         self.polity_variant_map: Dict[str, Set[str]] = {}
         self.config: GeneratorConfig = self._load_configuration(config_path)
-        self.current_mod_folder_name = Path(__file__).parent.parent.name
+        self.current_mod_folder_name = Path(__file__).resolve().parents[1].name
         self.enabled_mods: EnabledModIds = self._load_enabled_mod_ids_from_dlc_load()
         self.overlong_tech_ids = set()
         self.MAX_PREREQ_DISPLAY = 2
