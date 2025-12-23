@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Set
 
 from .models import Technology
+from .config import EnabledModIds, GeneratorConfig
 from .config_mixin import ConfigAndLocalizationMixin
 from .parser_mixin import ParserMixin
 from .render_mixin import RenderMixin
@@ -22,19 +23,9 @@ class TechTreeGenerator(ConfigAndLocalizationMixin, ParserMixin, RenderMixin, Cy
         self.variant_tech_ids: Set[str] = set()
         self.variant_trigger_overrides: Dict[str, Dict[str, str]] = {}
         self.polity_variant_map: Dict[str, Set[str]] = {}
-        (self.base_game_path,
-         self.mod_folder_path,
-         self.dlc_load_json_path,
-         self.priority_localization_mod_ids,
-         self.target_language_code,
-         self.max_children_per_node,
-         self.max_tree_depth,
-         self.max_display_nodes,
-         self.local_mod_folder_path,
-         self.polity_description_suffixes) = self._load_configuration(config_path)
-        self.target_lang_key = f"l_{self.target_language_code}"
+        self.config: GeneratorConfig = self._load_configuration(config_path)
         self.current_mod_folder_name = Path(__file__).parent.parent.name
-        self.enabled_mod_ids = self._load_enabled_mod_ids_from_dlc_load()
+        self.enabled_mods: EnabledModIds = self._load_enabled_mod_ids_from_dlc_load()
         self.overlong_tech_ids = set()
         self.MAX_PREREQ_DISPLAY = 2
         self.ELLIPSIS = "…"

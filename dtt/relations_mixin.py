@@ -9,7 +9,7 @@ class RelationsMixin:
 
     def _precompute_overlong_trees(self) -> None:
         self.overlong_tech_ids.clear()
-        T = self.max_display_nodes
+        T = self.config.display.max_display_nodes
         if T <= 0:
             return
         for tid, tech in self.all_technologies.items():
@@ -17,7 +17,7 @@ class RelationsMixin:
                 self.overlong_tech_ids.add(tid)
 
     def _print_overlong_tree_roots(self, limit: int = 50):
-        T = self.max_display_nodes
+        T = self.config.display.max_display_nodes
         if T <= 0:
             return
         roots = sorted(self.overlong_tech_ids)

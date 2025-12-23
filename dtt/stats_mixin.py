@@ -18,11 +18,13 @@ class StatsMixin:
         stats = self.calculate_generation_statistics()
         print(f"\n{self._l('stats_header')}")
         print(self._l('stats_total', total=stats['total'], base=stats['base'], mod=stats['mod']))
-        localized_count = sum(1 for descs in self.tech_descriptions.values() if self.target_language_code in descs)
-        print(self._l('stats_localization', lang=self.target_language_code, count=localized_count))
+        lang_code = self.config.localization.target_language_code
+        localized_count = sum(1 for descs in self.tech_descriptions.values() if lang_code in descs)
+        print(self._l('stats_localization', lang=lang_code, count=localized_count))
         if self.overlong_tech_ids:
-            print(self._l('stats_overlong', threshold=self.max_display_nodes, count=len(self.overlong_tech_ids)))
+            print(self._l('stats_overlong', threshold=self.config.display.max_display_nodes, count=len(self.overlong_tech_ids)))
             self._print_overlong_tree_roots()
         else:
-            if self.max_display_nodes > 0:
-                print(self._l('overbreadth_zero', threshold=self.max_display_nodes))
+            max_display_nodes = self.config.display.max_display_nodes
+            if max_display_nodes > 0:
+                print(self._l('overbreadth_zero', threshold=max_display_nodes))

@@ -2,14 +2,22 @@
 import os
 import configparser
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 import re
 
 from .localization import LOCALIZATION_STRINGS
+from .config import (
+    DisplayConfig,
+    EnabledModIds,
+    GeneratorConfig,
+    LocalizationConfig,
+    PathConfig,
+    TechConfig,
+)
 
 
 class ConfigAndLocalizationMixin:
-    def _load_configuration(self, config_path: str) -> tuple:
+    def _load_configuration(self, config_path: str) -> GeneratorConfig:
         config = configparser.ConfigParser()
         config.read(config_path, encoding='utf-8')
         try:
@@ -52,13 +60,11 @@ class ConfigAndLocalizationMixin:
             variant_triggers_str = config.get('technology', 'variant_triggers', fallback='').strip()
         if variant_triggers_str:
             variant_triggers = [t.strip() for t in variant_triggers_str.split(',') if t.strip()]
-        self.variant_triggers = variant_triggers
         polity_suffixes = ['corporate', 'machine_intelligence', 'hive_mind']
         if config.has_section('technology'):
             polity_suffixes_str = config.get('technology', 'polity_suffixes', fallback='').strip()
             if polity_suffixes_str:
                 polity_suffixes = [s.strip() for s in polity_suffixes_str.split(',') if s.strip()] or polity_suffixes
-        self.polity_description_suffixes = polity_suffixes
         max_children_per_node = 0
         max_tree_depth = 0
         max_display_nodes = 0
@@ -75,26 +81,46 @@ class ConfigAndLocalizationMixin:
                 max_display_nodes = config.getint('display', 'max_display_nodes', fallback=0)
             except ValueError:
                 pass
-        return (base_path,
-                workshop_mod_path,
-                dlc_path,
-                priority_mods,
-                language_code,
-                max_children_per_node,
-                max_tree_depth,
-                max_display_nodes,
-                local_mod_path,
-                self.polity_description_suffixes)
+        return GeneratorConfig(
+            paths=PathConfig(
+                base_game_path=base_path,
+                mod_folder_path=workshop_mod_path,
+                local_mod_folder_path=local_mod_path,
+                dlc_load_json_path=dlc_path,
+            ),
+            localization=LocalizationConfig(
+                target_language_code=language_code,
+                priority_localization_mod_ids=priority_mods,
+            ),
+            display=DisplayConfig(
+                max_children_per_node=max_children_per_node,
+                max_tree_depth=max_tree_depth,
+                max_display_nodes=max_display_nodes,
+            ),
+            tech=TechConfig(
+                variant_triggers=variant_triggers,
+                polity_description_suffixes=polity_suffixes,
+            ),
+        )
 
-    def _load_enabled_mod_ids_from_dlc_load(self) -> List[str]:
+    def _load_enabled_mod_ids_from_dlc_load(self) -> EnabledModIds:
         try:
-            if self.dlc_load_json_path:
-                dlc_json_path = Path(self.dlc_load_json_path)
+            dlc_path_value = ""
+            local_mod_root = ""
+            config = getattr(self, "config", None)
+            if config is not None:
+                dlc_path_value = config.paths.dlc_load_json_path
+                local_mod_root = config.paths.local_mod_folder_path
             else:
-                return []
+                dlc_path_value = getattr(self, "dlc_load_json_path", "")
+                local_mod_root = getattr(self, "local_mod_folder_path", "")
+            if dlc_path_value:
+                dlc_json_path = Path(dlc_path_value)
+            else:
+                return EnabledModIds()
             if not dlc_json_path.exists():
                 print(self._l("warn_missing_dlc_load", path=dlc_json_path))
-                return []
+                return EnabledModIds()
             data = json.loads(dlc_json_path.read_text(encoding='utf-8'))
             enabled = data.get('enabled_mods', [])
             workshop_ids: List[str] = []
@@ -102,7 +128,7 @@ class ConfigAndLocalizationMixin:
             seen_w = set()
             seen_l = set()
             path_pattern = re.compile(r'path\s*=\s*"([^"\n]+)"')
-            local_root = self.local_mod_folder_path or str(Path.home() / 'Documents' / 'Paradox Interactive' / 'Stellaris' / 'mod')
+            local_root = local_mod_root or str(Path.home() / 'Documents' / 'Paradox Interactive' / 'Stellaris' / 'mod')
             local_root_path = Path(local_root)
             for entry in enabled:
                 name = Path(entry).name
@@ -131,18 +157,17 @@ class ConfigAndLocalizationMixin:
                     if local_dir_name and local_dir_name not in seen_l:
                         local_ids.append(local_dir_name)
                         seen_l.add(local_dir_name)
-            # store on self for later scanning logic
-            self.workshop_mod_ids = workshop_ids
-            self.local_mod_ids = local_ids
-            combined = workshop_ids + local_ids
-            print(self._l("msg_enabled_mods_count", count=len(combined)))
-            return combined
+            enabled_mods = EnabledModIds(workshop_ids=workshop_ids, local_ids=local_ids)
+            print(self._l("msg_enabled_mods_count", count=len(enabled_mods.all_ids)))
+            return enabled_mods
         except Exception as e:
             print(self._l("warn_read_dlc_load_failed", error=e))
-            return []
+            return EnabledModIds()
 
     def _l(self, key: str, **kwargs) -> str:
-        lang_dict = LOCALIZATION_STRINGS.get(self.target_language_code, LOCALIZATION_STRINGS.get('english', {}))
+        config = getattr(self, "config", None)
+        lang_code = config.localization.target_language_code if config is not None else "english"
+        lang_dict = LOCALIZATION_STRINGS.get(lang_code, LOCALIZATION_STRINGS.get('english', {}))
         base = lang_dict.get(key)
         if base is None:
             base = LOCALIZATION_STRINGS.get('english', {}).get(key, key)

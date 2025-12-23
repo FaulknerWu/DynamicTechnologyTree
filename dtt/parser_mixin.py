@@ -68,11 +68,12 @@ class ParserMixin:
         return existing, missing_mods, missing_subdirs
 
     def scan_all_technology_files(self):
-        self._scan_technology_path(Path(self.base_game_path) / "common" / "technology")
+        self._scan_technology_path(Path(self.config.paths.base_game_path) / "common" / "technology")
         self.base_game_tech_ids = set(self.all_technologies.keys())
 
-        workshop_root = Path(self.mod_folder_path)
-        local_root = Path(self.local_mod_folder_path) if getattr(self, 'local_mod_folder_path', '') else None
+        workshop_root = Path(self.config.paths.mod_folder_path)
+        local_mod_path = self.config.paths.local_mod_folder_path
+        local_root = Path(local_mod_path) if local_mod_path else None
         scanned_count = 0
         missing_mod_dirs: List[str] = []
         missing_tech_dirs: List[str] = []
@@ -87,8 +88,8 @@ class ParserMixin:
                 if new_techs > 0:
                     scanned_count += 1
 
-        workshop_ids = getattr(self, 'workshop_mod_ids', [])
-        local_ids = getattr(self, 'local_mod_ids', [])
+        workshop_ids = self.enabled_mods.workshop_ids
+        local_ids = self.enabled_mods.local_ids
         process_mod_roots(workshop_ids, workshop_root)
         process_mod_roots(local_ids, local_root)
         if missing_mod_dirs:
@@ -149,7 +150,7 @@ class ParserMixin:
         return ""
 
     def _parse_variant_swaps(self, tech: Technology, content: str) -> None:
-        triggers = getattr(self, 'variant_triggers', [])
+        triggers = self.config.tech.variant_triggers
         if not triggers:
             return
         compiled_patterns = {
@@ -199,6 +200,16 @@ class ParserMixin:
             search_pos = brace_index + len(block) + 1
 
     def _parse_tech_block_content(self, tech: Technology, content: str):
+        """Parse technology block and populate tech attributes."""
+        self._parse_basic_attributes(tech, content)
+        self._parse_cost_and_levels(tech, content)
+        self._parse_weight_attributes(tech, content)
+        self._parse_complex_blocks(tech, content)
+        self._parse_boolean_flags(tech, content)
+        self._parse_variant_swaps(tech, content)
+
+    def _parse_basic_attributes(self, tech: Technology, content: str) -> None:
+        """Parse: area, tier, prerequisites, categories, potential/unlock_conditions."""
         if area_match := self.RESEARCH_AREA_REGEX.search(content):
             tech.research_area = area_match.group(1)
         if tier_match := self.TIER_REGEX.search(content):
@@ -209,14 +220,17 @@ class ParserMixin:
             tech.prerequisite_tech_ids = [m_id if m_id else w_id for m_id, w_id in tech_matches]
         if self.STARTING_TECH_REGEX.search(content):
             tech.prerequisite_tech_ids = []
-        if cost_match := self.COST_REGEX.search(content):
-            tech.research_cost = cost_match.group(1)
         if cat_m := self.CATEGORY_REGEX.search(content):
             cat_block = self._extract_braced_block(content, cat_m.end())
             tech.tech_categories = [c for c in self.WORD_REGEX.findall(cat_block)]
         if pot_m := self.POTENTIAL_REGEX.search(content):
             pot_block = self._extract_braced_block(content, pot_m.end())
             tech.unlock_conditions = [p for p in self.WORD_REGEX.findall(pot_block)]
+
+    def _parse_cost_and_levels(self, tech: Technology, content: str) -> None:
+        """Parse: cost, levels, cost_per_level, gateway."""
+        if cost_match := self.COST_REGEX.search(content):
+            tech.research_cost = cost_match.group(1)
         if levels_match := self.LEVELS_REGEX.search(content):
             try:
                 tech.levels = int(levels_match.group(1))
@@ -226,10 +240,13 @@ class ParserMixin:
                 tech.is_repeatable_tech = True
         if cpl_match := self.COST_PER_LEVEL_REGEX.search(content):
             tech.cost_per_level = cpl_match.group(1)
-        if weight_match := self.WEIGHT_REGEX.search(content):
-            tech.weight = weight_match.group(1)
         if gateway_match := self.GATEWAY_REGEX.search(content):
             tech.gateway = gateway_match.group(1) or gateway_match.group(2) or ""
+
+    def _parse_weight_attributes(self, tech: Technology, content: str) -> None:
+        """Parse: weight, weight_groups, mod_weight_if_group_picked."""
+        if weight_match := self.WEIGHT_REGEX.search(content):
+            tech.weight = weight_match.group(1)
         if wg_match := self.WEIGHT_GROUPS_REGEX.search(content):
             wg_block = self._extract_braced_block(content, wg_match.end())
             if wg_block:
@@ -238,6 +255,9 @@ class ParserMixin:
             mw_block = self._extract_braced_block(content, mw_match.end())
             if mw_block:
                 tech.mod_weight_if_group_picked = self._parse_simple_assignment_block(mw_block)
+
+    def _parse_complex_blocks(self, tech: Technology, content: str) -> None:
+        """Parse: feature_flags, weight_modifier, ai_weight."""
         if ff_match := self.FEATURE_FLAGS_REGEX.search(content):
             ff_block = self._extract_braced_block(content, ff_match.end())
             if ff_block:
@@ -250,26 +270,29 @@ class ParserMixin:
             ai_block = self._extract_braced_block(content, ai_match.end())
             if ai_block:
                 tech.ai_weight_script = self._clean_script_block(ai_block)
+
+    def _parse_boolean_flags(self, tech: Technology, content: str) -> None:
+        """Parse: is_dangerous, is_repeatable (start_tech handled in basic)."""
         tech.is_dangerous_tech = tech.is_dangerous_tech or bool(self.DANGEROUS_TECH_REGEX.search(content))
         tech.is_repeatable_tech = tech.is_repeatable_tech or bool(self.REPEATABLE_TECH_REGEX.search(content))
-        self._parse_variant_swaps(tech, content)
 
     def scan_all_tech_descriptions(self):
-        self._scan_language_descriptions(self.target_language_code)
+        self._scan_language_descriptions(self.config.localization.target_language_code)
 
     def _scan_language_descriptions(self, lang_code: str):
         lang_key_prefix = f"l_{lang_code}"
         pattern = f"*{lang_key_prefix}*.yml"
         found_tracker = {}
-        base_loc_path = Path(self.base_game_path) / 'localisation'
+        base_loc_path = Path(self.config.paths.base_game_path) / 'localisation'
         if base_loc_path.exists():
             for yml_file in base_loc_path.rglob(pattern):
                 try:
                     self._parse_description_file_generic(yml_file, lang_code, found_tracker)
                 except Exception:
                     pass
-        mod_folder = Path(self.mod_folder_path)
-        local_mod_folder = Path(self.local_mod_folder_path) if getattr(self, 'local_mod_folder_path', '') else None
+        mod_folder = Path(self.config.paths.mod_folder_path)
+        local_mod_path = self.config.paths.local_mod_folder_path
+        local_mod_folder = Path(local_mod_path) if local_mod_path else None
         scanned_priority: Set[str] = set()
 
         def scan_localisation_dirs(paths: List[Tuple[str, Path]]):
@@ -280,17 +303,17 @@ class ParserMixin:
                     except Exception:
                         pass
 
-        if self.priority_localization_mod_ids:
+        if self.config.localization.priority_localization_mod_ids:
             priority_ids = [
-                mod_id for mod_id in self.priority_localization_mod_ids
-                if mod_id in self.enabled_mod_ids
+                mod_id for mod_id in self.config.localization.priority_localization_mod_ids
+                if mod_id in self.enabled_mods.all_ids
             ]
             priority_paths, _, _ = self._collect_mod_subdirs(priority_ids, mod_folder, ("localisation",))
             scan_localisation_dirs(priority_paths)
             scanned_priority.update(mod_id for mod_id, _ in priority_paths)
 
         workshop_paths, _, _ = self._collect_mod_subdirs(
-            getattr(self, 'workshop_mod_ids', []),
+            self.enabled_mods.workshop_ids,
             mod_folder,
             ("localisation",),
             skip_ids=scanned_priority,
@@ -298,7 +321,7 @@ class ParserMixin:
         scan_localisation_dirs(workshop_paths)
 
         local_paths, _, _ = self._collect_mod_subdirs(
-            getattr(self, 'local_mod_ids', []),
+            self.enabled_mods.local_ids,
             local_mod_folder,
             ("localisation",),
             skip_ids=scanned_priority,
@@ -309,7 +332,7 @@ class ParserMixin:
         content = self._read_file_with_encoding(filepath)
         if not content:
             return
-        polity_suffixes = getattr(self, 'polity_description_suffixes', [])
+        polity_suffixes = self.config.tech.polity_description_suffixes
         variant_set = getattr(self, 'variant_tech_ids', None)
         polity_variant_map = getattr(self, 'polity_variant_map', None)
         for line in content.splitlines():
