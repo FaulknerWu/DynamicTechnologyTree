@@ -15,15 +15,15 @@ class PathConfig:
 class LocalizationConfig:
     """Localization settings."""
     target_language_code: str = "simp_chinese"
-    priority_localization_mod_ids: List[str] = field(default_factory=list)
+    priority_localization_mod_ids: List[str] = field(default_factory=lambda: ["2131014154"])
 
 
 @dataclass(frozen=True)
 class DisplayConfig:
     """Tree rendering display limits."""
-    max_children_per_node: int = 0
-    max_tree_depth: int = 0
-    max_display_nodes: int = 0
+    max_children_per_node: int = 12
+    max_tree_depth: int = 4
+    max_display_nodes: int = 128
 
 
 @dataclass(frozen=True)

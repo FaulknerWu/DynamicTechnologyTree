@@ -214,12 +214,12 @@ class ConfigEditor(QWidget):
         self.language_combo.setCurrentIndex(language_index)
 
         self.priority_mods_input.setText(
-            config.get("localization", "priority_mods", fallback="").strip()
+            config.get("localization", "priority_mods", fallback="2131014154").strip()
         )
 
-        self.max_children_spin.setValue(self._get_int(config, "display", "max_children_per_node", 0))
-        self.max_depth_spin.setValue(self._get_int(config, "display", "max_tree_depth", 0))
-        self.max_nodes_spin.setValue(self._get_int(config, "display", "max_display_nodes", 0))
+        self.max_children_spin.setValue(self._get_int(config, "display", "max_children_per_node", 12))
+        self.max_depth_spin.setValue(self._get_int(config, "display", "max_tree_depth", 4))
+        self.max_nodes_spin.setValue(self._get_int(config, "display", "max_display_nodes", 128))
 
     def save_to_config(self, config: configparser.ConfigParser) -> None:
         self._ensure_section(config, "paths")

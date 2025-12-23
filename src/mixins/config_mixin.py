@@ -50,24 +50,24 @@ class ConfigAndLocalizationMixin:
         language_code = config.get('localization', 'language', fallback='simp_chinese').strip() or 'simp_chinese'
         if language_code not in LOCALIZATION_STRINGS:
             language_code = 'english'
-        priority_mods_str = config.get('localization', 'priority_mods', fallback='').strip()
+        priority_mods_str = config.get('localization', 'priority_mods', fallback='2131014154').strip()
         priority_mods: List[str] = [m.strip() for m in priority_mods_str.split(',') if m.strip()]
         if priority_mods:
             print(LOCALIZATION_STRINGS['english'].get('msg_priority_localization_mods', 'Priority localization MODs: {count}').format(count=len(priority_mods)))
-        max_children_per_node = 0
-        max_tree_depth = 0
-        max_display_nodes = 0
+        max_children_per_node = 12
+        max_tree_depth = 4
+        max_display_nodes = 128
         if config.has_section('display'):
             try:
-                max_children_per_node = config.getint('display', 'max_children_per_node', fallback=0)
+                max_children_per_node = config.getint('display', 'max_children_per_node', fallback=12)
             except ValueError:
                 pass
             try:
-                max_tree_depth = config.getint('display', 'max_tree_depth', fallback=0)
+                max_tree_depth = config.getint('display', 'max_tree_depth', fallback=4)
             except ValueError:
                 pass
             try:
-                max_display_nodes = config.getint('display', 'max_display_nodes', fallback=0)
+                max_display_nodes = config.getint('display', 'max_display_nodes', fallback=128)
             except ValueError:
                 pass
         return GeneratorConfig(
