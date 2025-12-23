@@ -3,8 +3,10 @@
 # Usage: pyinstaller build/techtree_gui.spec
 
 from pathlib import Path
+import os
 
-project_root = Path(__file__).resolve().parent.parent
+# SPECPATH is provided by PyInstaller
+project_root = Path(SPECPATH).parent
 
 block_cipher = None
 
@@ -22,6 +24,11 @@ a = Analysis(
     hiddenimports=[
         'gui',
         'gui.fonts',
+        'gui.path_detector',
+        'gui.title_bar',
+        'gui.config_editor',
+        'gui.main_window',
+        'gui.generation_worker',
         'generator',
         'config',
         'mixins.config_mixin',

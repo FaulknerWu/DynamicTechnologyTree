@@ -17,12 +17,11 @@ gui = ["PyQt6"]
 dev = ["pytest", "pytest-cov"]
 
 [project.scripts]
-dtt = "cli:main"
 dtt-gui = "gui:main"
 
 [tool.setuptools]
 package-dir = {"": "src"}
-py-modules = ["cli", "config", "generator", "localization", "models"]
+py-modules = ["config", "generator", "localization", "models"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

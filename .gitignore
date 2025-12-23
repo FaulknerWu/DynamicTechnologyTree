@@ -6,13 +6,13 @@ __pycache__/
 *.egg
 *.egg-info/
 .eggs/
+.venv/
+.venv-win/
 
-# Build
+# Build & Dist
 dist/
 build/
-!build/
-build/*
-!build/*.spec
+*.spec
 *.exe
 
 # IDE
@@ -28,3 +28,6 @@ config.ini
 
 # Generated output
 localisation/
+common/
+graphs/
+output/
