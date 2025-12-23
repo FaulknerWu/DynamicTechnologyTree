@@ -54,17 +54,6 @@ class ConfigAndLocalizationMixin:
         priority_mods: List[str] = [m.strip() for m in priority_mods_str.split(',') if m.strip()]
         if priority_mods:
             print(LOCALIZATION_STRINGS['english'].get('msg_priority_localization_mods', 'Priority localization MODs: {count}').format(count=len(priority_mods)))
-        variant_triggers_str = ''
-        variant_triggers: List[str] = []
-        if config.has_section('technology'):
-            variant_triggers_str = config.get('technology', 'variant_triggers', fallback='').strip()
-        if variant_triggers_str:
-            variant_triggers = [t.strip() for t in variant_triggers_str.split(',') if t.strip()]
-        polity_suffixes = ['corporate', 'machine_intelligence', 'hive_mind']
-        if config.has_section('technology'):
-            polity_suffixes_str = config.get('technology', 'polity_suffixes', fallback='').strip()
-            if polity_suffixes_str:
-                polity_suffixes = [s.strip() for s in polity_suffixes_str.split(',') if s.strip()] or polity_suffixes
         max_children_per_node = 0
         max_tree_depth = 0
         max_display_nodes = 0
@@ -97,10 +86,7 @@ class ConfigAndLocalizationMixin:
                 max_tree_depth=max_tree_depth,
                 max_display_nodes=max_display_nodes,
             ),
-            tech=TechConfig(
-                variant_triggers=variant_triggers,
-                polity_description_suffixes=polity_suffixes,
-            ),
+            tech=TechConfig(),
         )
 
     def _load_enabled_mod_ids_from_dlc_load(self) -> EnabledModIds:

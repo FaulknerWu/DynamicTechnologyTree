@@ -21,6 +21,12 @@ def main() -> int:
         pass
 
     app = QApplication(sys.argv)
+
+    # Load bundled CJK fonts for proper Chinese text display
+    from gui.fonts import load_fonts, set_default_font
+    if load_fonts():
+        set_default_font(app)
+
     window = MainWindow(config_path=config_path)
     window.show()
     return app.exec()

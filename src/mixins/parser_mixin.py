@@ -153,10 +153,25 @@ class ParserMixin:
         triggers = self.config.tech.variant_triggers
         if not triggers:
             return
-        compiled_patterns = {
-            trigger: re.compile(rf"\b{re.escape(trigger)}\b\s*=\s*(?:yes|1)", re.IGNORECASE)
-            for trigger in triggers
-        }
+        # Build patterns for each (trigger_name, expected_value) pair
+        # Key format: trigger_name for boolean, "trigger_name=value" for parameterized
+        compiled_patterns = {}
+        for trigger_name, expected_value in triggers:
+            if expected_value.lower() == "yes":
+                # Boolean trigger: match "yes" or "1"
+                pattern = re.compile(
+                    rf"\b{re.escape(trigger_name)}\b\s*=\s*(?:yes|1)",
+                    re.IGNORECASE
+                )
+                key = trigger_name
+            else:
+                # Parameterized trigger: match specific value
+                pattern = re.compile(
+                    rf"\b{re.escape(trigger_name)}\b\s*=\s*{re.escape(expected_value)}",
+                    re.IGNORECASE
+                )
+                key = f"{trigger_name}={expected_value}"
+            compiled_patterns[key] = pattern
         search_pos = 0
         while True:
             match = self.TECH_SWAP_REGEX.search(content, search_pos)

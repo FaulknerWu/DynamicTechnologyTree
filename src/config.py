@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -28,8 +28,27 @@ class DisplayConfig:
 
 @dataclass(frozen=True)
 class TechConfig:
-    """Technology-specific settings."""
-    variant_triggers: List[str] = field(default_factory=list)
+    """Technology-specific settings (hardcoded, not configurable)."""
+    # Format: (trigger_name, expected_value)
+    # Boolean triggers use "yes", parameterized triggers use specific value
+    variant_triggers: List[Tuple[str, str]] = field(default_factory=lambda: [
+        # Boolean triggers
+        ("is_wilderness_empire", "yes"),
+        ("country_uses_bio_ships", "yes"),
+        ("is_beastmasters_empire", "yes"),
+        ("is_gestalt", "yes"),
+        ("is_tankbound_empire", "yes"),
+        ("is_reanimator", "yes"),
+        ("is_hive_empire", "yes"),
+        ("is_robot_empire", "yes"),
+        ("is_machine_empire", "yes"),
+        ("is_cloning_authority", "yes"),
+        # Parameterized triggers
+        ("has_ascension_perk", "ap_weather_control"),
+        ("has_origin", "origin_shroud_forged"),
+        ("has_origin", "origin_overtuned"),
+        ("is_situation_type", "situation_voidworm_plague"),
+    ])
     polity_description_suffixes: List[str] = field(
         default_factory=lambda: ["corporate", "machine_intelligence", "hive_mind"]
     )

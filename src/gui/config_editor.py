@@ -42,7 +42,6 @@ class ConfigEditor(QWidget):
         self._build_paths_tab()
         self._build_localization_tab()
         self._build_display_tab()
-        self._build_technology_tab()
 
     def _build_paths_tab(self) -> None:
         tab = QWidget(self)
@@ -106,20 +105,6 @@ class ConfigEditor(QWidget):
         form.addRow("最大显示节点数 (0 = 无限制)", self.max_nodes_spin)
 
         self.tabs.addTab(tab, "显示设置")
-
-    def _build_technology_tab(self) -> None:
-        tab = QWidget(self)
-        form = QFormLayout(tab)
-
-        self.variant_triggers_input = QLineEdit(tab)
-        self.variant_triggers_input.setPlaceholderText("逗号分隔")
-        form.addRow("变体触发条件", self.variant_triggers_input)
-
-        self.polity_suffixes_input = QLineEdit(tab)
-        self.polity_suffixes_input.setPlaceholderText("逗号分隔")
-        form.addRow("政体后缀", self.polity_suffixes_input)
-
-        self.tabs.addTab(tab, "科技设置")
 
     def _create_path_row(
         self,
@@ -190,13 +175,6 @@ class ConfigEditor(QWidget):
         self.max_depth_spin.setValue(self._get_int(config, "display", "max_tree_depth", 0))
         self.max_nodes_spin.setValue(self._get_int(config, "display", "max_display_nodes", 0))
 
-        self.variant_triggers_input.setText(
-            config.get("technology", "variant_triggers", fallback="").strip()
-        )
-        self.polity_suffixes_input.setText(
-            config.get("technology", "polity_suffixes", fallback="").strip()
-        )
-
     def save_to_config(self, config: configparser.ConfigParser) -> None:
         self._ensure_section(config, "paths")
         config.set("paths", "base_game_path", self.base_game_path_input.text().strip())
@@ -214,10 +192,6 @@ class ConfigEditor(QWidget):
         config.set("display", "max_children_per_node", str(self.max_children_spin.value()))
         config.set("display", "max_tree_depth", str(self.max_depth_spin.value()))
         config.set("display", "max_display_nodes", str(self.max_nodes_spin.value()))
-
-        self._ensure_section(config, "technology")
-        config.set("technology", "variant_triggers", self.variant_triggers_input.text().strip())
-        config.set("technology", "polity_suffixes", self.polity_suffixes_input.text().strip())
 
     def validate(self) -> tuple[bool, str]:
         missing_fields = []

@@ -21,6 +21,7 @@ a = Analysis(
     ],
     hiddenimports=[
         'gui',
+        'gui.fonts',
         'generator',
         'config',
         'mixins.config_mixin',
