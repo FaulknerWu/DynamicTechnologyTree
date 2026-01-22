@@ -19,10 +19,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from config import DisplayConfig, LocalizationConfig
 from gui.path_detector import DetectedPaths, PathDetector
+from localization import LOCALIZATION_STRINGS
 
 
-LANGUAGE_OPTIONS = [
+_LANGUAGE_ORDER = [
     "english",
     "simp_chinese",
     "french",
@@ -34,6 +36,22 @@ LANGUAGE_OPTIONS = [
     "polish",
     "braz_por",
 ]
+
+
+def _language_options() -> list[str]:
+    # Keep a stable order, but avoid drifting away from actual supported languages.
+    keys = list(LOCALIZATION_STRINGS.keys())
+    seen = set()
+    ordered: list[str] = []
+    for lang in _LANGUAGE_ORDER:
+        if lang in LOCALIZATION_STRINGS and lang not in seen:
+            ordered.append(lang)
+            seen.add(lang)
+    for lang in sorted(keys):
+        if lang not in seen:
+            ordered.append(lang)
+            seen.add(lang)
+    return ordered
 
 
 class ConfigEditor(QWidget):
@@ -104,7 +122,7 @@ class ConfigEditor(QWidget):
         form = QFormLayout(tab)
 
         self.language_combo = QComboBox(tab)
-        self.language_combo.addItems(LANGUAGE_OPTIONS)
+        self.language_combo.addItems(_language_options())
         form.addRow("语言", self.language_combo)
 
         self.priority_mods_input = QLineEdit(tab)
@@ -165,7 +183,9 @@ class ConfigEditor(QWidget):
                 lambda: self._browse_file(line_edit, dialog_title, file_filter)
             )
         else:
-            browse_button.clicked.connect(lambda: self._browse_folder(line_edit, dialog_title))
+            browse_button.clicked.connect(
+                lambda: self._browse_folder(line_edit, dialog_title)
+            )
 
         line_edit.textChanged.connect(
             lambda text: self._update_path_status(status_label, text)
@@ -190,6 +210,9 @@ class ConfigEditor(QWidget):
             target.setText(file_path)
 
     def load_from_config(self, config: configparser.ConfigParser) -> None:
+        default_loc = LocalizationConfig()
+        default_display = DisplayConfig()
+
         self.base_game_path_input.setText(
             config.get("paths", "base_game_path", fallback="").strip()
         )
@@ -203,39 +226,82 @@ class ConfigEditor(QWidget):
             config.get("paths", "local_mod_folder_path", fallback="").strip()
         )
 
-        language = config.get("localization", "language", fallback="simp_chinese").strip().lower()
+        language = (
+            config.get(
+                "localization",
+                "language",
+                fallback=default_loc.target_language_code,
+            )
+            .strip()
+            .lower()
+        )
         if not language:
-            language = "simp_chinese"
+            language = default_loc.target_language_code
         language_index = self.language_combo.findText(language)
         if language_index == -1:
-            language_index = self.language_combo.findText("simp_chinese")
+            language_index = self.language_combo.findText(
+                default_loc.target_language_code
+            )
         if language_index == -1:
             language_index = 0
         self.language_combo.setCurrentIndex(language_index)
 
         self.priority_mods_input.setText(
-            config.get("localization", "priority_mods", fallback="2131014154").strip()
+            config.get(
+                "localization",
+                "priority_mods",
+                fallback=",".join(default_loc.priority_localization_mod_ids),
+            ).strip()
         )
 
-        self.max_children_spin.setValue(self._get_int(config, "display", "max_children_per_node", 12))
-        self.max_depth_spin.setValue(self._get_int(config, "display", "max_tree_depth", 4))
-        self.max_nodes_spin.setValue(self._get_int(config, "display", "max_display_nodes", 128))
+        self.max_children_spin.setValue(
+            self._get_int(
+                config,
+                "display",
+                "max_children_per_node",
+                default_display.max_children_per_node,
+            )
+        )
+        self.max_depth_spin.setValue(
+            self._get_int(
+                config,
+                "display",
+                "max_tree_depth",
+                default_display.max_tree_depth,
+            )
+        )
+        self.max_nodes_spin.setValue(
+            self._get_int(
+                config,
+                "display",
+                "max_display_nodes",
+                default_display.max_display_nodes,
+            )
+        )
 
     def save_to_config(self, config: configparser.ConfigParser) -> None:
         self._ensure_section(config, "paths")
         config.set("paths", "base_game_path", self.base_game_path_input.text().strip())
-        config.set("paths", "mod_folder_path", self.mod_folder_path_input.text().strip())
+        config.set(
+            "paths", "mod_folder_path", self.mod_folder_path_input.text().strip()
+        )
         config.set("paths", "dlc_load_path", self.dlc_load_path_input.text().strip())
         config.set(
-            "paths", "local_mod_folder_path", self.local_mod_folder_path_input.text().strip()
+            "paths",
+            "local_mod_folder_path",
+            self.local_mod_folder_path_input.text().strip(),
         )
 
         self._ensure_section(config, "localization")
         config.set("localization", "language", self.language_combo.currentText())
-        config.set("localization", "priority_mods", self.priority_mods_input.text().strip())
+        config.set(
+            "localization", "priority_mods", self.priority_mods_input.text().strip()
+        )
 
         self._ensure_section(config, "display")
-        config.set("display", "max_children_per_node", str(self.max_children_spin.value()))
+        config.set(
+            "display", "max_children_per_node", str(self.max_children_spin.value())
+        )
         config.set("display", "max_tree_depth", str(self.max_depth_spin.value()))
         config.set("display", "max_display_nodes", str(self.max_nodes_spin.value()))
 
@@ -284,19 +350,11 @@ class ConfigEditor(QWidget):
 
     @staticmethod
     def _detect_dlc_load_path() -> str | None:
-        user_data_path = PathDetector().detect_user_data_path()
-        if not user_data_path:
-            return None
-        dlc_path = os.path.join(user_data_path, "dlc_load.json")
-        return dlc_path if os.path.exists(dlc_path) else None
+        return PathDetector().detect_dlc_load_path()
 
     @staticmethod
     def _detect_local_mod_path() -> str | None:
-        user_data_path = PathDetector().detect_user_data_path()
-        if not user_data_path:
-            return None
-        local_mod_path = os.path.join(user_data_path, "mod")
-        return local_mod_path if os.path.exists(local_mod_path) else None
+        return PathDetector().detect_local_mod_path()
 
     @staticmethod
     def _update_path_status(label: QLabel, path_text: str) -> None:

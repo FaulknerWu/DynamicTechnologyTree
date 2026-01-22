@@ -15,7 +15,15 @@ from mixins.relations_mixin import RelationsMixin
 from localization import LOCALIZATION_STRINGS
 
 
-class TechTreeGenerator(ConfigAndLocalizationMixin, ParserMixin, RenderMixin, CycleMixin, StatsMixin, OutputMixin, RelationsMixin):
+class TechTreeGenerator(
+    ConfigAndLocalizationMixin,
+    ParserMixin,
+    RenderMixin,
+    CycleMixin,
+    StatsMixin,
+    OutputMixin,
+    RelationsMixin,
+):
     def __init__(self, config_path: str):
         self.all_technologies: Dict[str, Technology] = {}
         self.base_game_tech_ids = set()
@@ -27,8 +35,6 @@ class TechTreeGenerator(ConfigAndLocalizationMixin, ParserMixin, RenderMixin, Cy
         self.current_mod_folder_name = Path(__file__).resolve().parents[1].name
         self.enabled_mods: EnabledModIds = self._load_enabled_mod_ids_from_dlc_load()
         self.overlong_tech_ids = set()
-        self.MAX_PREREQ_DISPLAY = 2
-        self.ELLIPSIS = "…"
 
     def run_generation_process(self):
         try:
@@ -49,4 +55,5 @@ class TechTreeGenerator(ConfigAndLocalizationMixin, ParserMixin, RenderMixin, Cy
             except Exception:
                 print(f"Generation error: {e}")
             import traceback
+
             traceback.print_exc()

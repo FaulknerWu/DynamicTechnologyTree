@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import configparser
 from pathlib import Path
@@ -19,55 +19,104 @@ from config import (
 class ConfigAndLocalizationMixin:
     def _load_configuration(self, config_path: str) -> GeneratorConfig:
         config = configparser.ConfigParser()
-        config.read(config_path, encoding='utf-8')
+        config.read(config_path, encoding="utf-8")
+
+        default_loc = LocalizationConfig()
+        default_display = DisplayConfig()
         try:
-            base_path = config.get('paths', 'base_game_path')
-            workshop_mod_path = config.get('paths', 'mod_folder_path')
-            local_mod_path = config.get('paths', 'local_mod_folder_path', fallback='').strip()
-            dlc_path_cfg = config.get('paths', 'dlc_load_path', fallback='').strip()
+            base_path = config.get("paths", "base_game_path")
+            workshop_mod_path = config.get("paths", "mod_folder_path")
+            local_mod_path = config.get(
+                "paths", "local_mod_folder_path", fallback=""
+            ).strip()
+            dlc_path_cfg = config.get("paths", "dlc_load_path", fallback="").strip()
         except (configparser.NoSectionError, configparser.NoOptionError) as e:
-            fallback_lang = 'english'
+            fallback_lang = "english"
             msg_template = LOCALIZATION_STRINGS.get(fallback_lang, {}).get(
-                'error_missing_required_entries',
-                'Error: required configuration entries missing: {error}'
+                "error_missing_required_entries",
+                "Error: required configuration entries missing: {error}",
             )
             raise ValueError(msg_template.format(error=e))
         if not dlc_path_cfg:
-            if os.name == 'nt':
-                dlc_path = str(Path.home() / 'Documents' / 'Paradox Interactive' / 'Stellaris' / 'dlc_load.json')
+            if os.name == "nt":
+                dlc_path = str(
+                    Path.home()
+                    / "Documents"
+                    / "Paradox Interactive"
+                    / "Stellaris"
+                    / "dlc_load.json"
+                )
             else:
-                print(LOCALIZATION_STRINGS['english'].get('hint_missing_dlc_path_non_windows'))
-                dlc_path = ''
+                print(
+                    LOCALIZATION_STRINGS["english"].get(
+                        "hint_missing_dlc_path_non_windows"
+                    )
+                )
+                dlc_path = ""
         else:
             dlc_path = dlc_path_cfg
-        if not config.has_section('localization'):
-            fallback_lang = 'english'
+        if not config.has_section("localization"):
+            fallback_lang = "english"
             msg_template = LOCALIZATION_STRINGS.get(fallback_lang, {}).get(
-                'error_missing_localization_section',
-                'Error: missing [localization] section'
+                "error_missing_localization_section",
+                "Error: missing [localization] section",
             )
             raise ValueError(msg_template)
-        language_code = config.get('localization', 'language', fallback='simp_chinese').strip() or 'simp_chinese'
+
+        language_code = (
+            config.get(
+                "localization",
+                "language",
+                fallback=default_loc.target_language_code,
+            ).strip()
+            or default_loc.target_language_code
+        )
         if language_code not in LOCALIZATION_STRINGS:
-            language_code = 'english'
-        priority_mods_str = config.get('localization', 'priority_mods', fallback='2131014154').strip()
-        priority_mods: List[str] = [m.strip() for m in priority_mods_str.split(',') if m.strip()]
+            language_code = "english"
+        priority_mods_default = ",".join(default_loc.priority_localization_mod_ids)
+        priority_mods_str = config.get(
+            "localization",
+            "priority_mods",
+            fallback=priority_mods_default,
+        ).strip()
+        priority_mods: List[str] = [
+            m.strip() for m in priority_mods_str.split(",") if m.strip()
+        ]
         if priority_mods:
-            print(LOCALIZATION_STRINGS['english'].get('msg_priority_localization_mods', 'Priority localization MODs: {count}').format(count=len(priority_mods)))
-        max_children_per_node = 12
-        max_tree_depth = 4
-        max_display_nodes = 128
-        if config.has_section('display'):
+            print(
+                LOCALIZATION_STRINGS["english"]
+                .get(
+                    "msg_priority_localization_mods",
+                    "Priority localization MODs: {count}",
+                )
+                .format(count=len(priority_mods))
+            )
+        max_children_per_node = default_display.max_children_per_node
+        max_tree_depth = default_display.max_tree_depth
+        max_display_nodes = default_display.max_display_nodes
+        if config.has_section("display"):
             try:
-                max_children_per_node = config.getint('display', 'max_children_per_node', fallback=12)
+                max_children_per_node = config.getint(
+                    "display",
+                    "max_children_per_node",
+                    fallback=default_display.max_children_per_node,
+                )
             except ValueError:
                 pass
             try:
-                max_tree_depth = config.getint('display', 'max_tree_depth', fallback=4)
+                max_tree_depth = config.getint(
+                    "display",
+                    "max_tree_depth",
+                    fallback=default_display.max_tree_depth,
+                )
             except ValueError:
                 pass
             try:
-                max_display_nodes = config.getint('display', 'max_display_nodes', fallback=128)
+                max_display_nodes = config.getint(
+                    "display",
+                    "max_display_nodes",
+                    fallback=default_display.max_display_nodes,
+                )
             except ValueError:
                 pass
         return GeneratorConfig(
@@ -107,33 +156,37 @@ class ConfigAndLocalizationMixin:
             if not dlc_json_path.exists():
                 print(self._l("warn_missing_dlc_load", path=dlc_json_path))
                 return EnabledModIds()
-            data = json.loads(dlc_json_path.read_text(encoding='utf-8'))
-            enabled = data.get('enabled_mods', [])
+            data = json.loads(dlc_json_path.read_text(encoding="utf-8"))
+            enabled = data.get("enabled_mods", [])
             workshop_ids: List[str] = []
             local_ids: List[str] = []
             seen_w = set()
             seen_l = set()
             path_pattern = re.compile(r'path\s*=\s*"([^"\n]+)"')
-            local_root = local_mod_root or str(Path.home() / 'Documents' / 'Paradox Interactive' / 'Stellaris' / 'mod')
+            local_root = local_mod_root or str(
+                Path.home() / "Documents" / "Paradox Interactive" / "Stellaris" / "mod"
+            )
             local_root_path = Path(local_root)
             for entry in enabled:
                 name = Path(entry).name
-                if not name.endswith('.mod'):
+                if not name.endswith(".mod"):
                     continue
-                if name.startswith('ugc_'):
-                    num_part = name[len('ugc_'):-len('.mod')]
+                if name.startswith("ugc_"):
+                    num_part = name[len("ugc_") : -len(".mod")]
                     if num_part.isdigit() and num_part not in seen_w:
                         workshop_ids.append(num_part)
                         seen_w.add(num_part)
                 else:
                     descriptor_path = local_root_path / name
-                    local_dir_name = ''
+                    local_dir_name = ""
                     try:
                         if descriptor_path.exists():
-                            text = descriptor_path.read_text(encoding='utf-8', errors='ignore')
+                            text = descriptor_path.read_text(
+                                encoding="utf-8", errors="ignore"
+                            )
                             m = path_pattern.search(text)
                             if m:
-                                candidate = Path(m.group(1).strip().strip('/')).name
+                                candidate = Path(m.group(1).strip().strip("/")).name
                                 if candidate:
                                     local_dir_name = candidate
                         if not local_dir_name:
@@ -152,11 +205,17 @@ class ConfigAndLocalizationMixin:
 
     def _l(self, key: str, **kwargs) -> str:
         config = getattr(self, "config", None)
-        lang_code = config.localization.target_language_code if config is not None else "english"
-        lang_dict = LOCALIZATION_STRINGS.get(lang_code, LOCALIZATION_STRINGS.get('english', {}))
+        lang_code = (
+            config.localization.target_language_code
+            if config is not None
+            else "english"
+        )
+        lang_dict = LOCALIZATION_STRINGS.get(
+            lang_code, LOCALIZATION_STRINGS.get("english", {})
+        )
         base = lang_dict.get(key)
         if base is None:
-            base = LOCALIZATION_STRINGS.get('english', {}).get(key, key)
+            base = LOCALIZATION_STRINGS.get("english", {}).get(key, key)
         try:
             return base.format(**kwargs)
         except Exception:

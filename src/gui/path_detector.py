@@ -51,9 +51,21 @@ class PathDetector:
                 Path.home() / ".local" / "share" / "Steam",
                 Path.home() / ".steam" / "steam",
                 Path.home() / ".steam" / "root",
-                Path.home() / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam",
+                Path.home()
+                / ".var"
+                / "app"
+                / "com.valvesoftware.Steam"
+                / ".local"
+                / "share"
+                / "Steam",
                 Path.home() / "snap" / "steam" / "common" / ".steam" / "steam",
-                Path.home() / "snap" / "steam" / "common" / ".local" / "share" / "Steam",
+                Path.home()
+                / "snap"
+                / "steam"
+                / "common"
+                / ".local"
+                / "share"
+                / "Steam",
             ]
         )
 
@@ -68,6 +80,12 @@ class PathDetector:
     def detect_user_data_path(self) -> str | None:
         candidates = self._user_data_candidates()
         return self._first_existing_path(candidates)
+
+    def detect_dlc_load_path(self) -> str | None:
+        return self._detect_dlc_load_path(self.detect_user_data_path())
+
+    def detect_local_mod_path(self) -> str | None:
+        return self._detect_local_mod_path(self.detect_user_data_path())
 
     def _user_data_candidates(self) -> list[Path]:
         home = Path.home()
@@ -97,14 +115,14 @@ class PathDetector:
 
     def _detect_game_path_from_libraries(self, library_paths: list[str]) -> str | None:
         for library_path in library_paths:
-            candidate = os.path.join(
-                library_path, "steamapps", "common", GAME_DIR_NAME
-            )
+            candidate = os.path.join(library_path, "steamapps", "common", GAME_DIR_NAME)
             if os.path.exists(candidate):
                 return candidate
         return None
 
-    def _detect_workshop_path_from_libraries(self, library_paths: list[str]) -> str | None:
+    def _detect_workshop_path_from_libraries(
+        self, library_paths: list[str]
+    ) -> str | None:
         for library_path in library_paths:
             candidate = os.path.join(
                 library_path, "steamapps", "workshop", "content", STEAM_APP_ID
@@ -147,9 +165,13 @@ class PathDetector:
         return paths
 
     def _detect_steam_path_windows(self) -> str | None:
+        if os.name != "nt":
+            return None
         try:
             import winreg
-
+        except ImportError:
+            return None
+        try:
             with winreg.OpenKey(
                 winreg.HKEY_LOCAL_MACHINE,
                 r"SOFTWARE\WOW6432Node\Valve\Steam",
