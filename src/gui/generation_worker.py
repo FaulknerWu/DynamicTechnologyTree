@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from threading import Event
 
@@ -63,6 +64,8 @@ class GenerationWorker(QThread):
             else:
                 self.finished.emit(False, "Generation did not complete.")
         except Exception as exc:  # pragma: no cover - GUI error handling
+            # Preserve traceback for debugging when the failure happens before stdout/stderr redirection.
+            self.log_message.emit(traceback.format_exc().rstrip())
             self.finished.emit(False, str(exc))
 
     def cancel(self) -> None:

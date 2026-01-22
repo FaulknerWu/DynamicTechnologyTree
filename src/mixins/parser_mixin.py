@@ -1,38 +1,144 @@
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 from models import Technology
 from localization import LOCALIZATION_STRINGS
 
 
+if TYPE_CHECKING:  # pragma: no cover
+    from config import EnabledModIds, GeneratorConfig
+
+
+class FileReadError(RuntimeError):
+    def __init__(self, path: Path, exc: BaseException) -> None:
+        super().__init__(f"failed to read {path}: {type(exc).__name__}: {exc}")
+        self.path = path
+        self.original_exception = exc
+
+
 class ParserMixin:
-    TECH_DEFINITION_REGEX = re.compile(r'(?m)^(\w+)\s*=\s*\{')
-    PREREQUISITES_REGEX = re.compile(r'prerequisites\s*=\s*\{')
-    COST_REGEX = re.compile(r'cost\s*=\s*([@\w\d]+)')
-    CATEGORY_REGEX = re.compile(r'category\s*=\s*\{')
-    POTENTIAL_REGEX = re.compile(r'(?:potential|starting_potential)\s*=\s*\{')
-    DANGEROUS_TECH_REGEX = re.compile(r'is_dangerous\s*=\s*yes')
-    REPEATABLE_TECH_REGEX = re.compile(r'is_repeatable\s*=\s*yes')
-    TECH_SWAP_REGEX = re.compile(r'technology_swap\s*=\s*\{')
+    if TYPE_CHECKING:  # pragma: no cover
+        # Populated by TechTreeGenerator / other mixins.
+        config: "GeneratorConfig"
+        enabled_mods: "EnabledModIds"
+        current_mod_folder_name: str
+        all_technologies: Dict[str, Technology]
+        base_game_tech_ids: Set[str]
+        tech_descriptions: Dict[str, Dict[str, str]]
+
+        def _l(self, key: str, **kwargs: object) -> str: ...
+
+    TECH_DEFINITION_REGEX = re.compile(r"(?m)^(\w+)\s*=\s*\{")
+    PREREQUISITES_REGEX = re.compile(r"prerequisites\s*=\s*\{")
+    COST_REGEX = re.compile(r"cost\s*=\s*([@\w\d]+)")
+    CATEGORY_REGEX = re.compile(r"category\s*=\s*\{")
+    POTENTIAL_REGEX = re.compile(r"(?:potential|starting_potential)\s*=\s*\{")
+    DANGEROUS_TECH_REGEX = re.compile(r"is_dangerous\s*=\s*yes")
+    REPEATABLE_TECH_REGEX = re.compile(r"is_repeatable\s*=\s*yes")
+    TECH_SWAP_REGEX = re.compile(r"technology_swap\s*=\s*\{")
     SWAP_NAME_REGEX = re.compile(r'name\s*=\s*(?:"([^"\n]+)"|([@\w\.]+))')
-    SWAP_TRIGGER_REGEX = re.compile(r'trigger\s*=\s*\{')
-    RESEARCH_AREA_REGEX = re.compile(r'area\s*=\s*(\w+)')
-    TIER_REGEX = re.compile(r'tier\s*=\s*(\d+)')
-    STARTING_TECH_REGEX = re.compile(r'start_tech\s*=\s*yes')
+    SWAP_TRIGGER_REGEX = re.compile(r"trigger\s*=\s*\{")
+    RESEARCH_AREA_REGEX = re.compile(r"area\s*=\s*(\w+)")
+    TIER_REGEX = re.compile(r"tier\s*=\s*(\d+)")
+    STARTING_TECH_REGEX = re.compile(r"start_tech\s*=\s*yes")
     TECH_ID_REGEX = re.compile(r'"([^"]+)"|(\w+)')
-    WORD_REGEX = re.compile(r'[\w_]+')
-    DESCRIPTION_LOCALIZATION_REGEX = re.compile(r'^\s*([a-zA-Z0-9_]+_desc(?:_[a-zA-Z0-9_]+)*):(?:\d+)?\s*"([^"]*(?:\\.[^"]*)*)"', re.IGNORECASE)
-    WHITESPACE_CLEANUP_REGEX = re.compile(r'\s+')
-    LEVELS_REGEX = re.compile(r'levels\s*=\s*(-?\d+)')
-    COST_PER_LEVEL_REGEX = re.compile(r'cost_per_level\s*=\s*([@\w\.\-]+)')
-    WEIGHT_REGEX = re.compile(r'\bweight\s*=\s*([@\w\.\-]+)')
+    WORD_REGEX = re.compile(r"[\w_]+")
+    DESCRIPTION_LOCALIZATION_REGEX = re.compile(
+        r'^\s*([a-zA-Z0-9_]+_desc(?:_[a-zA-Z0-9_]+)*):(?:\d+)?\s*"([^"]*(?:\\.[^"]*)*)"',
+        re.IGNORECASE,
+    )
+    WHITESPACE_CLEANUP_REGEX = re.compile(r"\s+")
+    LEVELS_REGEX = re.compile(r"levels\s*=\s*(-?\d+)")
+    COST_PER_LEVEL_REGEX = re.compile(r"cost_per_level\s*=\s*([@\w\.\-]+)")
+    WEIGHT_REGEX = re.compile(r"\bweight\s*=\s*([@\w\.\-]+)")
     GATEWAY_REGEX = re.compile(r'\bgateway\s*=\s*(?:"([^"\n]+)"|([@\w\.]+))')
-    FEATURE_FLAGS_REGEX = re.compile(r'feature_flags\s*=\s*\{')
-    WEIGHT_GROUPS_REGEX = re.compile(r'weight_groups\s*=\s*\{')
-    MOD_WEIGHT_GROUP_REGEX = re.compile(r'mod_weight_if_group_picked\s*=\s*\{')
-    WEIGHT_MODIFIER_REGEX = re.compile(r'weight_modifier\s*=\s*\{')
-    AI_WEIGHT_REGEX = re.compile(r'ai_weight\s*=\s*\{')
+    FEATURE_FLAGS_REGEX = re.compile(r"feature_flags\s*=\s*\{")
+    WEIGHT_GROUPS_REGEX = re.compile(r"weight_groups\s*=\s*\{")
+    MOD_WEIGHT_GROUP_REGEX = re.compile(r"mod_weight_if_group_picked\s*=\s*\{")
+    WEIGHT_MODIFIER_REGEX = re.compile(r"weight_modifier\s*=\s*\{")
+    AI_WEIGHT_REGEX = re.compile(r"ai_weight\s*=\s*\{")
+
+    # Avoid log spam: keep only the first few failures per scan.
+    _MAX_FAILURE_EXAMPLES = 10
+
+    def _reset_scan_reports(self) -> None:
+        # Tech scan
+        self._tech_scan_total_files = 0
+        self._tech_scan_ok_files = 0
+        self._tech_scan_failed_files = 0
+        self._tech_scan_failure_examples: list[tuple[str, str]] = []
+
+        # Localization scan
+        self._loc_scan_total_files = 0
+        self._loc_scan_ok_files = 0
+        self._loc_scan_failed_files = 0
+        self._loc_scan_failure_examples: list[tuple[str, str]] = []
+
+        # Shared file-read failures (reset per stage)
+        self._read_failed_files = 0
+        self._read_failure_examples: list[tuple[str, str]] = []
+
+    def _record_failure(self, *, kind: str, path: Path, exc: BaseException) -> None:
+        if kind == "tech":
+            self._tech_scan_failed_files += 1
+            examples = self._tech_scan_failure_examples
+        else:
+            self._loc_scan_failed_files += 1
+            examples = self._loc_scan_failure_examples
+
+        if len(examples) < self._MAX_FAILURE_EXAMPLES:
+            examples.append((str(path), f"{type(exc).__name__}: {exc}"))
+
+    def _print_scan_report(self, *, kind: str) -> None:
+        if kind == "tech":
+            total = self._tech_scan_total_files
+            ok = self._tech_scan_ok_files
+            failed = self._tech_scan_failed_files
+            examples = self._tech_scan_failure_examples
+            summary_key = "warn_tech_parse_summary"
+            example_key = "warn_tech_parse_failure_example"
+        else:
+            total = self._loc_scan_total_files
+            ok = self._loc_scan_ok_files
+            failed = self._loc_scan_failed_files
+            examples = self._loc_scan_failure_examples
+            summary_key = "warn_loc_parse_summary"
+            example_key = "warn_loc_parse_failure_example"
+
+        if total:
+            suppressed = max(failed - len(examples), 0)
+            print(
+                self._l(
+                    summary_key,
+                    total=total,
+                    ok=ok,
+                    failed=failed,
+                    shown=len(examples),
+                    suppressed=suppressed,
+                )
+            )
+            for path_str, err_str in examples:
+                print(self._l(example_key, path=path_str, error=err_str))
+
+        if self._read_failed_files:
+            suppressed = max(
+                self._read_failed_files - len(self._read_failure_examples), 0
+            )
+            print(
+                self._l(
+                    "warn_read_file_failed_summary",
+                    failed=self._read_failed_files,
+                    shown=len(self._read_failure_examples),
+                    suppressed=suppressed,
+                )
+            )
+            for path_str, err_str in self._read_failure_examples:
+                print(
+                    self._l(
+                        "warn_read_file_failed_example", path=path_str, error=err_str
+                    )
+                )
 
     def _collect_mod_subdirs(
         self,
@@ -68,7 +174,10 @@ class ParserMixin:
         return existing, missing_mods, missing_subdirs
 
     def scan_all_technology_files(self):
-        self._scan_technology_path(Path(self.config.paths.base_game_path) / "common" / "technology")
+        self._reset_scan_reports()
+        self._scan_technology_path(
+            Path(self.config.paths.base_game_path) / "common" / "technology"
+        )
         self.base_game_tech_ids = set(self.all_technologies.keys())
 
         workshop_root = Path(self.config.paths.mod_folder_path)
@@ -80,7 +189,9 @@ class ParserMixin:
 
         def process_mod_roots(mod_ids: List[str], root: Optional[Path]):
             nonlocal scanned_count
-            paths, missing_mods, missing_subs = self._collect_mod_subdirs(mod_ids, root, ("common", "technology"))
+            paths, missing_mods, missing_subs = self._collect_mod_subdirs(
+                mod_ids, root, ("common", "technology")
+            )
             missing_mod_dirs.extend(missing_mods)
             missing_tech_dirs.extend(missing_subs)
             for _, tech_path in paths:
@@ -96,15 +207,19 @@ class ParserMixin:
             print(self._l("msg_missing_mod_dirs", count=len(missing_mod_dirs)))
         print(self._l("msg_mods_with_new_techs", count=scanned_count))
 
+        self._print_scan_report(kind="tech")
+
     def _scan_technology_path(self, path: Path) -> int:
         if not path.exists():
             return 0
         before_count = len(self.all_technologies)
         for file_path in path.glob("*.txt"):
+            self._tech_scan_total_files += 1
             try:
                 self._parse_single_tech_file(file_path)
-            except Exception:
-                pass
+                self._tech_scan_ok_files += 1
+            except Exception as exc:
+                self._record_failure(kind="tech", path=file_path, exc=exc)
         return len(self.all_technologies) - before_count
 
     def _parse_single_tech_file(self, filepath: Path):
@@ -117,33 +232,52 @@ class ParserMixin:
             tech_block = self._extract_braced_block(content, match.end())
             if tech_block and tech_id not in self.all_technologies:
                 self.all_technologies[tech_id] = Technology(tech_id)
-                self._parse_tech_block_content(self.all_technologies[tech_id], tech_block)
+                self._parse_tech_block_content(
+                    self.all_technologies[tech_id], tech_block
+                )
 
     def _read_file_with_encoding(self, filepath: Path) -> str:
         try:
-            return filepath.read_text(encoding='utf-8-sig', errors='ignore')
+            return filepath.read_text(encoding="utf-8-sig", errors="ignore")
+        except FileNotFoundError:
+            # Treat as missing file; caller decides whether this matters.
+            return ""
+        except OSError as exc:
+            # Keep going but make it observable.
+            self._read_failed_files += 1
+            if len(self._read_failure_examples) < self._MAX_FAILURE_EXAMPLES:
+                self._read_failure_examples.append(
+                    (str(filepath), f"{type(exc).__name__}: {exc}")
+                )
+            raise FileReadError(filepath, exc) from exc
         except Exception:
+            # Fallback encoding attempt.
             try:
-                return filepath.read_text(encoding='utf-8', errors='ignore')
-            except Exception:
-                return ""
+                return filepath.read_text(encoding="utf-8", errors="ignore")
+            except Exception as exc:
+                self._read_failed_files += 1
+                if len(self._read_failure_examples) < self._MAX_FAILURE_EXAMPLES:
+                    self._read_failure_examples.append(
+                        (str(filepath), f"{type(exc).__name__}: {exc}")
+                    )
+                raise FileReadError(filepath, exc) from exc
 
     def _remove_comments_from_content(self, content: str) -> str:
         lines = []
         for line in content.splitlines():
-            if line.lstrip().startswith('#'):
+            if line.lstrip().startswith("#"):
                 continue
-            if '#' in line:
-                line = line.split('#', 1)[0]
+            if "#" in line:
+                line = line.split("#", 1)[0]
             lines.append(line)
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def _extract_braced_block(self, content: str, start_pos: int) -> str:
         brace_depth = 1
         for i, char in enumerate(content[start_pos:], start_pos):
-            if char == '{':
+            if char == "{":
                 brace_depth += 1
-            elif char == '}':
+            elif char == "}":
                 brace_depth -= 1
                 if brace_depth == 0:
                     return content[start_pos:i]
@@ -160,15 +294,14 @@ class ParserMixin:
             if expected_value.lower() == "yes":
                 # Boolean trigger: match "yes" or "1"
                 pattern = re.compile(
-                    rf"\b{re.escape(trigger_name)}\b\s*=\s*(?:yes|1)",
-                    re.IGNORECASE
+                    rf"\b{re.escape(trigger_name)}\b\s*=\s*(?:yes|1)", re.IGNORECASE
                 )
                 key = trigger_name
             else:
                 # Parameterized trigger: match specific value
                 pattern = re.compile(
                     rf"\b{re.escape(trigger_name)}\b\s*=\s*{re.escape(expected_value)}",
-                    re.IGNORECASE
+                    re.IGNORECASE,
                 )
                 key = f"{trigger_name}={expected_value}"
             compiled_patterns[key] = pattern
@@ -177,7 +310,7 @@ class ParserMixin:
             match = self.TECH_SWAP_REGEX.search(content, search_pos)
             if not match:
                 break
-            brace_index = content.find('{', match.start())
+            brace_index = content.find("{", match.start())
             if brace_index == -1:
                 break
             block = self._extract_braced_block(content, brace_index + 1)
@@ -190,11 +323,13 @@ class ParserMixin:
                 continue
             swap_name = name_match.group(1) or name_match.group(2)
             trigger_match = self.SWAP_TRIGGER_REGEX.search(block)
-            trigger_block = ''
+            trigger_block = ""
             if trigger_match:
-                trig_brace_index = block.find('{', trigger_match.start())
+                trig_brace_index = block.find("{", trigger_match.start())
                 if trig_brace_index != -1:
-                    trigger_block = self._extract_braced_block(block, trig_brace_index + 1)
+                    trigger_block = self._extract_braced_block(
+                        block, trig_brace_index + 1
+                    )
             if not trigger_block or not swap_name:
                 search_pos = brace_index + len(block) + 1
                 continue
@@ -204,14 +339,18 @@ class ParserMixin:
                 if pattern.search(trigger_block):
                     tech.variants[trigger] = swap_name
                     if swap_name:
-                        variant_ids = getattr(self, 'variant_tech_ids', None)
+                        variant_ids = getattr(self, "variant_tech_ids", None)
                         if variant_ids is None:
                             variant_ids = set()
-                            setattr(self, 'variant_tech_ids', variant_ids)
+                            setattr(self, "variant_tech_ids", variant_ids)
                         variant_ids.add(swap_name)
-                        trigger_overrides = getattr(self, 'variant_trigger_overrides', None)
+                        trigger_overrides = getattr(
+                            self, "variant_trigger_overrides", None
+                        )
                         if trigger_overrides is not None:
-                            trigger_overrides.setdefault(trigger, {})[tech.tech_id] = swap_name
+                            trigger_overrides.setdefault(trigger, {})[tech.tech_id] = (
+                                swap_name
+                            )
             search_pos = brace_index + len(block) + 1
 
     def _parse_tech_block_content(self, tech: Technology, content: str):
@@ -232,7 +371,9 @@ class ParserMixin:
         if m := self.PREREQUISITES_REGEX.search(content):
             block = self._extract_braced_block(content, m.end())
             tech_matches = self.TECH_ID_REGEX.findall(block)
-            tech.prerequisite_tech_ids = [m_id if m_id else w_id for m_id, w_id in tech_matches]
+            tech.prerequisite_tech_ids = [
+                m_id if m_id else w_id for m_id, w_id in tech_matches
+            ]
         if self.STARTING_TECH_REGEX.search(content):
             tech.prerequisite_tech_ids = []
         if cat_m := self.CATEGORY_REGEX.search(content):
@@ -269,7 +410,9 @@ class ParserMixin:
         if mw_match := self.MOD_WEIGHT_GROUP_REGEX.search(content):
             mw_block = self._extract_braced_block(content, mw_match.end())
             if mw_block:
-                tech.mod_weight_if_group_picked = self._parse_simple_assignment_block(mw_block)
+                tech.mod_weight_if_group_picked = self._parse_simple_assignment_block(
+                    mw_block
+                )
 
     def _parse_complex_blocks(self, tech: Technology, content: str) -> None:
         """Parse: feature_flags, weight_modifier, ai_weight."""
@@ -288,23 +431,33 @@ class ParserMixin:
 
     def _parse_boolean_flags(self, tech: Technology, content: str) -> None:
         """Parse: is_dangerous, is_repeatable (start_tech handled in basic)."""
-        tech.is_dangerous_tech = tech.is_dangerous_tech or bool(self.DANGEROUS_TECH_REGEX.search(content))
-        tech.is_repeatable_tech = tech.is_repeatable_tech or bool(self.REPEATABLE_TECH_REGEX.search(content))
+        tech.is_dangerous_tech = tech.is_dangerous_tech or bool(
+            self.DANGEROUS_TECH_REGEX.search(content)
+        )
+        tech.is_repeatable_tech = tech.is_repeatable_tech or bool(
+            self.REPEATABLE_TECH_REGEX.search(content)
+        )
 
     def scan_all_tech_descriptions(self):
+        self._reset_scan_reports()
         self._scan_language_descriptions(self.config.localization.target_language_code)
+        self._print_scan_report(kind="loc")
 
     def _scan_language_descriptions(self, lang_code: str):
         lang_key_prefix = f"l_{lang_code}"
         pattern = f"*{lang_key_prefix}*.yml"
         found_tracker = {}
-        base_loc_path = Path(self.config.paths.base_game_path) / 'localisation'
+        base_loc_path = Path(self.config.paths.base_game_path) / "localisation"
         if base_loc_path.exists():
             for yml_file in base_loc_path.rglob(pattern):
+                self._loc_scan_total_files += 1
                 try:
-                    self._parse_description_file_generic(yml_file, lang_code, found_tracker)
-                except Exception:
-                    pass
+                    self._parse_description_file_generic(
+                        yml_file, lang_code, found_tracker
+                    )
+                    self._loc_scan_ok_files += 1
+                except Exception as exc:
+                    self._record_failure(kind="loc", path=yml_file, exc=exc)
         mod_folder = Path(self.config.paths.mod_folder_path)
         local_mod_path = self.config.paths.local_mod_folder_path
         local_mod_folder = Path(local_mod_path) if local_mod_path else None
@@ -313,17 +466,24 @@ class ParserMixin:
         def scan_localisation_dirs(paths: List[Tuple[str, Path]]):
             for _, loc_dir in paths:
                 for yml_file in loc_dir.rglob(pattern):
+                    self._loc_scan_total_files += 1
                     try:
-                        self._parse_description_file_generic(yml_file, lang_code, found_tracker)
-                    except Exception:
-                        pass
+                        self._parse_description_file_generic(
+                            yml_file, lang_code, found_tracker
+                        )
+                        self._loc_scan_ok_files += 1
+                    except Exception as exc:
+                        self._record_failure(kind="loc", path=yml_file, exc=exc)
 
         if self.config.localization.priority_localization_mod_ids:
             priority_ids = [
-                mod_id for mod_id in self.config.localization.priority_localization_mod_ids
+                mod_id
+                for mod_id in self.config.localization.priority_localization_mod_ids
                 if mod_id in self.enabled_mods.all_ids
             ]
-            priority_paths, _, _ = self._collect_mod_subdirs(priority_ids, mod_folder, ("localisation",))
+            priority_paths, _, _ = self._collect_mod_subdirs(
+                priority_ids, mod_folder, ("localisation",)
+            )
             scan_localisation_dirs(priority_paths)
             scanned_priority.update(mod_id for mod_id, _ in priority_paths)
 
@@ -343,38 +503,44 @@ class ParserMixin:
         )
         scan_localisation_dirs(local_paths)
 
-    def _parse_description_file_generic(self, filepath: Path, lang_code: str, found_tracker: Optional[dict]):
+    def _parse_description_file_generic(
+        self, filepath: Path, lang_code: str, found_tracker: Optional[dict]
+    ):
         content = self._read_file_with_encoding(filepath)
         if not content:
             return
         polity_suffixes = self.config.tech.polity_description_suffixes
-        variant_set = getattr(self, 'variant_tech_ids', None)
-        polity_variant_map = getattr(self, 'polity_variant_map', None)
+        variant_set = getattr(self, "variant_tech_ids", None)
+        polity_variant_map = getattr(self, "polity_variant_map", None)
         for line in content.splitlines():
             line = line.strip()
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
             match = self.DESCRIPTION_LOCALIZATION_REGEX.match(line)
             if not match:
                 continue
             desc_key = match.group(1)
             description = self._clean_description_text(match.group(2))
-            base_tech_id = ''
+            base_tech_id = ""
             suffix_label = None
             for suffix in polity_suffixes:
-                suffix_token = f'_desc_{suffix}'
+                suffix_token = f"_desc_{suffix}"
                 if desc_key.endswith(suffix_token):
-                    base_tech_id = desc_key[:-len(suffix_token)]
+                    base_tech_id = desc_key[: -len(suffix_token)]
                     suffix_label = suffix
                     break
             if not base_tech_id:
-                if desc_key.endswith('_desc'):
-                    base_tech_id = desc_key[:-len('_desc')]
+                if desc_key.endswith("_desc"):
+                    base_tech_id = desc_key[: -len("_desc")]
                 else:
                     continue
             if not base_tech_id:
                 continue
-            target_tech_id = base_tech_id if suffix_label is None else f"{base_tech_id}_{suffix_label}"
+            target_tech_id = (
+                base_tech_id
+                if suffix_label is None
+                else f"{base_tech_id}_{suffix_label}"
+            )
             if base_tech_id not in self.all_technologies:
                 if variant_set is None or target_tech_id not in variant_set:
                     continue
@@ -394,11 +560,11 @@ class ParserMixin:
         assignments: Dict[str, str] = {}
         for raw_line in block.splitlines():
             line = raw_line.strip()
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
-            if '=' not in line:
+            if "=" not in line:
                 continue
-            key, value = line.split('=', 1)
+            key, value = line.split("=", 1)
             key = key.strip()
             value = value.strip()
             if not key:
@@ -410,11 +576,13 @@ class ParserMixin:
         parts = []
         for raw_line in block.splitlines():
             line = raw_line.strip()
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
             parts.append(line)
-        return ' '.join(parts)
+        return " ".join(parts)
 
     def _clean_description_text(self, description: str) -> str:
-        description = description.replace('\\"', '"').replace('\\n', ' ').replace('\\t', ' ')
-        return self.WHITESPACE_CLEANUP_REGEX.sub(' ', description).strip()
+        description = (
+            description.replace('\\"', '"').replace("\\n", " ").replace("\\t", " ")
+        )
+        return self.WHITESPACE_CLEANUP_REGEX.sub(" ", description).strip()

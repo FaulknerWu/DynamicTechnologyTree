@@ -20,7 +20,7 @@ dev = ["pytest", "pytest-cov"]
 dtt-gui = "gui:main"
 
 [tool.setuptools]
-package-dir = {"": "src"}
+package-dir = {"" = "src"}
 py-modules = ["config", "generator", "localization", "models"]
 
 [tool.setuptools.packages.find]

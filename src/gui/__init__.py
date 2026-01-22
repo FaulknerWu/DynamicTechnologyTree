@@ -17,8 +17,8 @@ def main() -> int:
 
     try:
         os.chdir(application_path)
-    except OSError:
-        pass
+    except OSError as exc:
+        print(f"Warning: failed to set working directory to '{application_path}': {exc}")
 
     app = QApplication(sys.argv)
 
