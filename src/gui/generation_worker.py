@@ -71,9 +71,6 @@ class GenerationWorker(QThread):
     def cancel(self) -> None:
         self._cancelled.set()
 
-    def is_cancelled(self) -> bool:
-        return self._cancelled.is_set()
-
     def _handle_log_message(self, message: str) -> None:
         for marker, value in self._progress_markers.items():
             if marker and marker in message:

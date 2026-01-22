@@ -1,5 +1,3 @@
-import os
-import sys
 from pathlib import Path
 from typing import Dict, Set
 
@@ -12,7 +10,6 @@ from mixins.cycle_mixin import CycleMixin
 from mixins.stats_mixin import StatsMixin
 from mixins.output_mixin import OutputMixin
 from mixins.relations_mixin import RelationsMixin
-from localization import LOCALIZATION_STRINGS
 
 
 class TechTreeGenerator(
