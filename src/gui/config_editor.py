@@ -410,16 +410,22 @@ class ConfigEditor(QWidget):
             QPushButton {
                 padding: 4px 10px;
                 margin: 2px;
-                border: 1px solid #ccc;
+                border: 1px solid palette(mid);
                 border-radius: 3px;
-                background-color: #f8f8f8;
+                background-color: palette(button);
+                color: palette(buttonText);
             }
             QPushButton:hover {
-                background-color: #e3f2fd;
-                border-color: #2196f3;
+                background-color: palette(midlight);
+                border-color: palette(highlight);
             }
             QPushButton:pressed {
-                background-color: #bbdefb;
+                background-color: palette(mid);
+            }
+            QPushButton:disabled {
+                background-color: palette(window);
+                color: palette(mid);
+                border-color: palette(mid);
             }
         """)
 

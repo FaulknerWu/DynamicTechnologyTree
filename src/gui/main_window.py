@@ -61,8 +61,8 @@ class MainWindow(QMainWindow):
         central_widget = QWidget(self)
         central_widget.setStyleSheet("""
             QWidget#centralWidget {
-                background-color: white;
-                border: 1px solid #ccc;
+                background-color: palette(window);
+                border: 1px solid palette(mid);
             }
         """)
         central_widget.setObjectName("centralWidget")
