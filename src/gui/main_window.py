@@ -24,6 +24,8 @@ from gui.config_editor import ConfigEditor
 from gui.generation_worker import GenerationWorker
 from gui.title_bar import CustomTitleBar
 
+# Note: keep imports flat to match the project's packaging/runtime model.
+
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -36,7 +38,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Stellaris 科技树生成器")
         self.setMinimumSize(700, 500)
 
-        self.config_path = Path(config_path) if config_path else self._default_config_path()
+        self.config_path = (
+            Path(config_path) if config_path else self._default_config_path()
+        )
         self.config = configparser.ConfigParser()
         self.worker: Optional[GenerationWorker] = None
 
@@ -46,7 +50,11 @@ class MainWindow(QMainWindow):
 
     def _default_config_path(self) -> Path:
         frozen = getattr(sys, "frozen", False)
-        application_path = Path(sys.executable).parent if frozen else Path(sys.argv[0]).resolve().parent
+        application_path = (
+            Path(sys.executable).parent
+            if frozen
+            else Path(sys.argv[0]).resolve().parent
+        )
         return application_path / "config.ini"
 
     def _build_ui(self) -> None:
@@ -108,11 +116,11 @@ class MainWindow(QMainWindow):
         else:
             self.showMaximized()
 
-    def changeEvent(self, event: QEvent) -> None:
-        if event.type() == QEvent.Type.WindowStateChange:
+    def changeEvent(self, a0: QEvent | None) -> None:
+        if a0 is not None and a0.type() == QEvent.Type.WindowStateChange:
             if hasattr(self, "title_bar"):
                 self.title_bar.set_maximized(self.isMaximized())
-        super().changeEvent(event)
+        super().changeEvent(a0)
 
     def append_log(self, message: str) -> None:
         self.log_output.append(message)
@@ -213,8 +221,10 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.critical(self, "错误", f"生成失败：{message}")
 
-    def closeEvent(self, event: QCloseEvent) -> None:
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        if a0 is None:
+            return
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
             self.worker.wait(5000)
-        event.accept()
+        a0.accept()
