@@ -1,0 +1,7 @@
+l_english:
+ tech_root_desc:0 "Root tech."
+ tech_root_desc_corporate:0 "Corporate root tech."
+ tech_child_a_desc:0 "Child A tech."
+ tech_child_a_gestalt_desc:0 "Gestalt child A tech."
+ tech_child_b_desc:0 "Child B tech."
+ tech_grandchild_desc:0 "Grandchild tech."

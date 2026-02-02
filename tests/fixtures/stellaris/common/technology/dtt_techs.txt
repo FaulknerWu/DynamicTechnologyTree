@@ -1,0 +1,26 @@
+tech_root = {
+    area = physics
+    tier = 1
+}
+
+tech_child_a = {
+    area = physics
+    tier = 2
+    prerequisites = { tech_root }
+    technology_swap = {
+        trigger = { is_gestalt = yes }
+        name = "tech_child_a_gestalt"
+    }
+}
+
+tech_child_b = {
+    area = engineering
+    tier = 2
+    prerequisites = { tech_root }
+}
+
+tech_grandchild = {
+    area = society
+    tier = 3
+    prerequisites = { tech_child_a }
+}

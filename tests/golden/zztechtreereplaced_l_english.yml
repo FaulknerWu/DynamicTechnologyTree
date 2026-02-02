@@ -1,0 +1,7 @@
+﻿l_english:
+ tech_child_a_desc:0 "Child A tech.(Tier:2)$tech_child_a_techtree$"
+ tech_child_a_gestalt_desc:0 "Gestalt child A tech.(Tier:2)$tech_child_a_gestalt_techtree$"
+ tech_child_b_desc:0 "Child B tech.(Tier:2)$tech_child_b_techtree$"
+ tech_grandchild_desc:0 "Grandchild tech.(Tier:3)$tech_grandchild_techtree$"
+ tech_root_desc:0 "Root tech.(Tier:1)$tech_root_techtree$"
+ tech_root_desc_corporate:0 "Corporate root tech.(Tier:1)$tech_root_corporate_techtree$"
