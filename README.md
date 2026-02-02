@@ -9,9 +9,9 @@
 ## 项目概览
 
 - **运行环境**：Python **3.10+**（见 `pyproject.toml`）。
-- **主要使用方式**：可选的 **PyQt6** 图形界面（见安装）。
+- **主要使用方式**：**PyQt6** 图形界面（GUI，唯一支持的使用方式）。
 - **核心流水线**：`TechTreeGenerator`（`src/generator.py`）。
-- **输出位置**：默认写到当前工作目录下的 `localisation/`（见 `src/mixins/output_mixin.py`）。
+- **输出位置**：默认写到当前工作目录下的 `localisation/`（见 `src/dtt_core/output.py`）。
 - **目标 Stellaris 版本**：`v4.2.*`（见 `descriptor.mod`）。
 
 ## 功能特性
@@ -24,10 +24,10 @@
 
 ## 快速开始（GUI）
 
-1) 以可编辑模式安装，并启用 GUI 依赖：
+1) 以可编辑模式安装（包含 GUI 依赖）：
 
 ```bash
-python -m pip install -e ".[gui]"
+python -m pip install -e .
 ```
 
 2) 在仓库根目录创建 `config.ini`（示例见下文）。
@@ -45,24 +45,18 @@ dtt-gui
 本项目使用 `src/` 目录结构，并通过 `setuptools` 打包（见 `pyproject.toml`）。
 
 ```bash
-# 基础安装（无 GUI）
+# 安装（包含 GUI）
 python -m pip install -e .
-
-# GUI 安装
-python -m pip install -e ".[gui]"
 
 # 开发安装（测试）
 python -m pip install -e ".[dev]"
-
-# 开发 + GUI
-python -m pip install -e ".[gui,dev]"
 ```
 
 ## 运行 GUI
 
 ### 已安装的入口（推荐）
 
-控制台脚本在 `pyproject.toml` 中定义：
+入口脚本在 `pyproject.toml` 中定义（`[project.gui-scripts]`）：
 
 - `dtt-gui = "gui:main"`
 
@@ -72,30 +66,9 @@ python -m pip install -e ".[gui,dev]"
 dtt-gui
 ```
 
-### 仓库脚本（备用）
-
-仓库中也提供了一个开发用启动脚本 `scripts/generate_tech_tree_gui.py`：它会先尝试 `import gui`，失败时将 `src/` 注入到 `sys.path`。
-
-运行：
-
-```bash
-python scripts/generate_tech_tree_gui.py
-```
-
-## 无 GUI（Headless）用法
-
-如果你不想使用 GUI，可以直接调用生成器：
-
-```python
-from generator import TechTreeGenerator
-
-gen = TechTreeGenerator("config.ini")
-gen.run_generation_process()
-```
-
 ## 配置（`config.ini`）
 
-生成器使用 Python `configparser` 读取配置（`src/mixins/config_mixin.py`）。
+生成器使用 Python `configparser` 读取配置（`src/dtt_core/config_loader.py`）。
 
 ### 必需的段/键
 
@@ -139,12 +112,12 @@ max_display_nodes = 128
 
 ### 关于 `dlc_load_path`
 
-- 在 **Windows** 上，如果 `dlc_load_path` 为空，生成器会默认使用 `~/Documents/Paradox Interactive/Stellaris/dlc_load.json`（见 `src/mixins/config_mixin.py`）。
+- 在 **Windows** 上，如果 `dlc_load_path` 为空，生成器会默认使用 `~/Documents/Paradox Interactive/Stellaris/dlc_load.json`（见 `src/dtt_core/config_loader.py`）。
 - 在 **非 Windows** 上，如果 `dlc_load_path` 为空，生成器会打印提示并继续执行（但不会做已启用 MOD 识别）。
 
 ## 输出
 
-生成过程会把本地化输出写到相对路径 `localisation/` 下（相对于进程当前工作目录，见 `src/mixins/output_mixin.py`）。
+生成过程会把本地化输出写到相对路径 `localisation/` 下（相对于进程当前工作目录，见 `src/dtt_core/output.py`）。
 
 每种目标语言会生成两类主要文件：
 
@@ -177,27 +150,26 @@ python -m pytest
 
 ## Windows 打包
 
-### 1) PowerShell 构建脚本
+Windows `.exe` **必须在 Windows 上构建**（PyInstaller 不支持可靠的跨平台打包）。
 
-`build_win.ps1`：
+在 Windows（PowerShell）中：
 
-- 如果缺失则创建 `.venv-win`。
-- 在该 venv 中安装 `PyQt6` 与 `pyinstaller`。
-- 以 `scripts/generate_tech_tree_gui.py` 为入口生成单文件、无控制台窗口的 EXE。
-- 打包 `src/gui/fonts/NotoSansSC-Regular.otf` 字体。
-
-运行：
+1) 创建并激活虚拟环境，安装依赖：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build_win.ps1
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+python -m pip install pyinstaller
+```
+
+2) 使用项目的 canonical spec 生成 EXE（入口为 `src/gui/__main__.py`）：
+
+```powershell
+pyinstaller packaging/pyinstaller/techtree_gui.spec
 ```
 
 输出：`dist/`（已在 `.gitignore` 中忽略）。
-
-### 2) PyInstaller spec 文件
-
-- 完整 spec：`pyinstaller build/techtree_gui.spec`
-- 精简 spec：`pyinstaller StellarisTechTreeGenerator.spec`
 
 ## 常见问题（FAQ）
 
@@ -217,8 +189,8 @@ powershell -ExecutionPolicy Bypass -File build_win.ps1
 
 ### “ModuleNotFoundError: No module named 'PyQt6'”
 
-请安装 GUI extra：
+PyQt6 是必需依赖。请确保你通过 `pip` 安装了本项目（会自动拉取 PyQt6）：
 
 ```bash
-python -m pip install -e ".[gui]"
+python -m pip install -e .
 ```

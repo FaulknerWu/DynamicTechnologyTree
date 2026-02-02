@@ -1,31 +1,41 @@
 # SRC KNOWLEDGE
 
+complexity: 3/5
+scope: src/*
+inherits: ../AGENTS.md
+
 ## OVERVIEW
-Python source lives under `src/` with a flat import model (top-level modules like `generator`, `config`, `models`, `localization`).
+Python source lives under `src/` with a hybrid layout: a few flat top-level modules (`generator`, `config`, `models`, `localization`) plus packages (`dtt_core/`, `gui/`).
+
+`src/generator.py` orchestrates the core pipeline via composition; the individual pipeline stages live under `src/dtt_core/`.
 
 ## STRUCTURE
 ```
 src/
-|-- generator.py        # TechTreeGenerator pipeline coordinator
+|-- generator.py        # TechTreeGenerator orchestrator (composition-based)
 |-- config.py           # config dataclasses/defaults (paths/localization/display/tech)
-|-- models.py           # Technology model used across mixins
+|-- models.py           # Technology model consumed across pipeline stages
 |-- localization.py     # per-language strings + research area icons
-|-- gui/                # PyQt6 GUI (entrypoint, window, worker, path detection)
-`-- mixins/             # pipeline stages (config/parser/render/output/relations/cycle/stats)
+|-- dtt_core/           # core pipeline stages (scan/parse/relations/render/output/etc.)
+`-- gui/                # PyQt6 GUI (entrypoint, window, worker, path detection)
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Orchestrator | `src/generator.py:18` | Mixins compose into `TechTreeGenerator` |
-| Config schema/defaults | `src/config.py:57` | `GeneratorConfig` + sub-config dataclasses |
+| Orchestrator | `src/generator.py:16` | Composes `dtt_core` stages into `TechTreeGenerator` |
+| Config schema/defaults | `src/config.py:58` | `GeneratorConfig` + sub-config dataclasses |
+| Core pipeline stages | `src/dtt_core/` | scan/parse, relations, render, cycle/stats, output |
 | Localization strings | `src/localization.py:9` | Used for UI + CLI-ish output + progress markers |
-| Model shape | `src/models.py:1` | `Technology` attributes consumed by parser/render/output |
+| Model shape | `src/models.py:6` | `Technology` attributes consumed by scan/relations/render/output |
 
 ## CONVENTIONS
-- Imports assume `src/` is on `sys.path` (either via install or script injection). Example: `from generator import TechTreeGenerator` (`src/gui/generation_worker.py:46`).
-- Packaging is configured for flat modules (`pyproject.toml:24`); adding a new top-level module may require updating `pyproject.toml`.
+- Imports assume `src/` is on `sys.path` (via installation). Example: `from generator import TechTreeGenerator` (`src/gui/generation_worker.py:46`).
+- Top-level modules are listed in `pyproject.toml` (`[tool.setuptools] py-modules`); adding a new flat module may require updating packaging config.
+- Packages under `src/` (e.g. `dtt_core`, `gui`) are discovered via `find_packages` (`pyproject.toml`); keep package names stable for PyInstaller/module execution.
+- `src/dynamic_technology_tree.egg-info/` is a build artifact (gitignored by `*.egg-info/`); avoid depending on it in code or docs.
 
 ## ANTI-PATTERNS
-- Adding a second "official" entrypoint without aligning config/cwd semantics (see `src/gui/__init__.py:13` vs `scripts/generate_tech_tree_gui.py:15`).
+- Documenting/adding a second user-facing entrypoint; `dtt-gui` is the supported launcher (keep `python -m gui` for module execution/PyInstaller only).
+- Growing new monolithic pipeline stages outside `src/dtt_core/`; prefer small, focused stage classes that `TechTreeGenerator` composes.
 - Introducing new top-level modules/packages under `src/` without deciding whether they are installed (setuptools config lives in `pyproject.toml:22`).
