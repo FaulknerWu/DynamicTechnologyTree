@@ -6,13 +6,33 @@ __pycache__/
 *.egg
 *.egg-info/
 .eggs/
+
+# Virtualenvs
 .venv/
 .venv-win/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# Logs
+*.log
 
 # Build & Dist
 dist/
 build/
 *.spec
+!packaging/pyinstaller/techtree_gui.spec
 *.exe
 
 # IDE
@@ -21,13 +41,21 @@ build/
 *.swp
 *.swo
 *~
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # Project specific
-config.ini
+/config.ini
 .claude/
+.sisyphus/
 
-# Generated output
-localisation/
-common/
-graphs/
-output/
+# Generated output (repo-root only)
+/localisation/
+/common/
+/graphs/
+/output/
