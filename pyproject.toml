@@ -10,13 +10,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 keywords = ["stellaris", "mod", "technology", "tree"]
-dependencies = []
+dependencies = ["PyQt6"]
 
 [project.optional-dependencies]
-gui = ["PyQt6"]
 dev = ["pytest", "pytest-cov"]
 
-[project.scripts]
+[project.gui-scripts]
 dtt-gui = "gui:main"
 
 [tool.setuptools]
@@ -34,3 +33,5 @@ python_functions = ["test_*"]
 
 [tool.pyright]
 extraPaths = ["src"]
+reportAttributeAccessIssue = "none"
+reportArgumentType = "none"
