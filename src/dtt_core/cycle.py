@@ -1,14 +1,24 @@
-from typing import List, Set
+from typing import Callable, Dict, List, Set
+
+from models import Technology
 
 
-class CycleMixin:
+class CycleDetector:
+    def __init__(
+        self,
+        all_technologies: Dict[str, Technology],
+        localize: Callable[..., str],
+    ) -> None:
+        self.all_technologies = all_technologies
+        self._l = localize
+
     def detect_circular_dependencies(self) -> List[List[str]]:
         cycles: List[List[str]] = []
         visited: Set[str] = set()
         on_path: Set[str] = set()
         stack: List[str] = []
 
-        def dfs(node: str):
+        def dfs(node: str) -> None:
             visited.add(node)
             on_path.add(node)
             stack.append(node)

@@ -2,10 +2,9 @@ import json
 import os
 import configparser
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 import re
 
-from localization import LOCALIZATION_STRINGS
 from config import (
     DisplayConfig,
     EnabledModIds,
@@ -16,8 +15,17 @@ from config import (
 )
 
 
-class ConfigAndLocalizationMixin:
-    def _load_configuration(self, config_path: str) -> GeneratorConfig:
+class ConfigLoader:
+    def __init__(
+        self, localization_strings: dict, config: Optional[GeneratorConfig] = None
+    ) -> None:
+        self._localization_strings = localization_strings
+        self._config = config
+
+    def set_config(self, config: Optional[GeneratorConfig]) -> None:
+        self._config = config
+
+    def load_configuration(self, config_path: str) -> GeneratorConfig:
         config = configparser.ConfigParser()
         config.read(config_path, encoding="utf-8")
 
@@ -32,7 +40,7 @@ class ConfigAndLocalizationMixin:
             dlc_path_cfg = config.get("paths", "dlc_load_path", fallback="").strip()
         except (configparser.NoSectionError, configparser.NoOptionError) as e:
             fallback_lang = "english"
-            msg_template = LOCALIZATION_STRINGS.get(fallback_lang, {}).get(
+            msg_template = self._localization_strings.get(fallback_lang, {}).get(
                 "error_missing_required_entries",
                 "Error: required configuration entries missing: {error}",
             )
@@ -48,7 +56,7 @@ class ConfigAndLocalizationMixin:
                 )
             else:
                 print(
-                    LOCALIZATION_STRINGS["english"].get(
+                    self._localization_strings["english"].get(
                         "hint_missing_dlc_path_non_windows"
                     )
                 )
@@ -57,7 +65,7 @@ class ConfigAndLocalizationMixin:
             dlc_path = dlc_path_cfg
         if not config.has_section("localization"):
             fallback_lang = "english"
-            msg_template = LOCALIZATION_STRINGS.get(fallback_lang, {}).get(
+            msg_template = self._localization_strings.get(fallback_lang, {}).get(
                 "error_missing_localization_section",
                 "Error: missing [localization] section",
             )
@@ -71,7 +79,7 @@ class ConfigAndLocalizationMixin:
             ).strip()
             or default_loc.target_language_code
         )
-        if language_code not in LOCALIZATION_STRINGS:
+        if language_code not in self._localization_strings:
             language_code = "english"
         priority_mods_default = ",".join(default_loc.priority_localization_mod_ids)
         priority_mods_str = config.get(
@@ -84,7 +92,7 @@ class ConfigAndLocalizationMixin:
         ]
         if priority_mods:
             print(
-                LOCALIZATION_STRINGS["english"]
+                self._localization_strings["english"]
                 .get(
                     "msg_priority_localization_mods",
                     "Priority localization MODs: {count}",
@@ -138,23 +146,26 @@ class ConfigAndLocalizationMixin:
             tech=TechConfig(),
         )
 
-    def _load_enabled_mod_ids_from_dlc_load(self) -> EnabledModIds:
+    def load_enabled_mod_ids_from_dlc_load(
+        self,
+        dlc_load_json_path: Optional[str] = None,
+        local_mod_folder_path: Optional[str] = None,
+    ) -> EnabledModIds:
         try:
             dlc_path_value = ""
             local_mod_root = ""
-            config = getattr(self, "config", None)
-            if config is not None:
-                dlc_path_value = config.paths.dlc_load_json_path
-                local_mod_root = config.paths.local_mod_folder_path
+            if self._config is not None:
+                dlc_path_value = self._config.paths.dlc_load_json_path
+                local_mod_root = self._config.paths.local_mod_folder_path
             else:
-                dlc_path_value = getattr(self, "dlc_load_json_path", "")
-                local_mod_root = getattr(self, "local_mod_folder_path", "")
+                dlc_path_value = dlc_load_json_path or ""
+                local_mod_root = local_mod_folder_path or ""
             if dlc_path_value:
                 dlc_json_path = Path(dlc_path_value)
             else:
                 return EnabledModIds()
             if not dlc_json_path.exists():
-                print(self._l("warn_missing_dlc_load", path=dlc_json_path))
+                print(self.l("warn_missing_dlc_load", path=dlc_json_path))
                 return EnabledModIds()
             data = json.loads(dlc_json_path.read_text(encoding="utf-8"))
             enabled = data.get("enabled_mods", [])
@@ -197,25 +208,25 @@ class ConfigAndLocalizationMixin:
                         local_ids.append(local_dir_name)
                         seen_l.add(local_dir_name)
             enabled_mods = EnabledModIds(workshop_ids=workshop_ids, local_ids=local_ids)
-            print(self._l("msg_enabled_mods_count", count=len(enabled_mods.all_ids)))
+            print(self.l("msg_enabled_mods_count", count=len(enabled_mods.all_ids)))
             return enabled_mods
         except Exception as e:
-            print(self._l("warn_read_dlc_load_failed", error=e))
+            print(self.l("warn_read_dlc_load_failed", error=e))
             return EnabledModIds()
 
-    def _l(self, key: str, **kwargs) -> str:
-        config = getattr(self, "config", None)
+    def l(self, key: str, **kwargs) -> str:
+        config = self._config
         lang_code = (
             config.localization.target_language_code
             if config is not None
             else "english"
         )
-        lang_dict = LOCALIZATION_STRINGS.get(
-            lang_code, LOCALIZATION_STRINGS.get("english", {})
+        lang_dict = self._localization_strings.get(
+            lang_code, self._localization_strings.get("english", {})
         )
         base = lang_dict.get(key)
         if base is None:
-            base = LOCALIZATION_STRINGS.get("english", {}).get(key, key)
+            base = self._localization_strings.get("english", {}).get(key, key)
         try:
             return base.format(**kwargs)
         except Exception:

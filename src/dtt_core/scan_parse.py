@@ -3,8 +3,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 from models import Technology
-from localization import LOCALIZATION_STRINGS
-
 
 if TYPE_CHECKING:  # pragma: no cover
     from config import EnabledModIds, GeneratorConfig
@@ -17,18 +15,7 @@ class FileReadError(RuntimeError):
         self.original_exception = exc
 
 
-class ParserMixin:
-    if TYPE_CHECKING:  # pragma: no cover
-        # Populated by TechTreeGenerator / other mixins.
-        config: "GeneratorConfig"
-        enabled_mods: "EnabledModIds"
-        current_mod_folder_name: str
-        all_technologies: Dict[str, Technology]
-        base_game_tech_ids: Set[str]
-        tech_descriptions: Dict[str, Dict[str, str]]
-
-        def _l(self, key: str, **kwargs: object) -> str: ...
-
+class ScanParseCore:
     TECH_DEFINITION_REGEX = re.compile(r"(?m)^(\w+)\s*=\s*\{")
     PREREQUISITES_REGEX = re.compile(r"prerequisites\s*=\s*\{")
     COST_REGEX = re.compile(r"cost\s*=\s*([@\w\d]+)")
@@ -45,7 +32,7 @@ class ParserMixin:
     TECH_ID_REGEX = re.compile(r'"([^"]+)"|(\w+)')
     WORD_REGEX = re.compile(r"[\w_]+")
     DESCRIPTION_LOCALIZATION_REGEX = re.compile(
-        r'^\s*([a-zA-Z0-9_]+_desc(?:_[a-zA-Z0-9_]+)*):(?:\d+)?\s*"([^"]*(?:\\.[^"]*)*)"',
+        r'^\s*([a-zA-Z0-9_]+_desc(?:_[a-zA-Z0-9_]+)*):(?:\d+)?\s*"([^\"]*(?:\\.[^\"]*)*)"',
         re.IGNORECASE,
     )
     WHITESPACE_CLEANUP_REGEX = re.compile(r"\s+")
@@ -61,6 +48,34 @@ class ParserMixin:
 
     # Avoid log spam: keep only the first few failures per scan.
     _MAX_FAILURE_EXAMPLES = 10
+
+    def __init__(
+        self,
+        *,
+        config: "GeneratorConfig",
+        enabled_mods: "EnabledModIds",
+        current_mod_folder_name: str,
+        localize,
+        all_technologies: Dict[str, Technology],
+        base_game_tech_ids: Set[str],
+        tech_descriptions: Dict[str, Dict[str, str]],
+        variant_trigger_overrides: Dict[str, Dict[str, str]],
+        polity_variant_map: Dict[str, Set[str]],
+        variant_tech_ids: Set[str],
+    ) -> None:
+        self.config = config
+        self.enabled_mods = enabled_mods
+        self.current_mod_folder_name = current_mod_folder_name
+        self._l = localize
+
+        self.all_technologies = all_technologies
+        self.base_game_tech_ids = base_game_tech_ids
+        self.tech_descriptions = tech_descriptions
+        self.variant_trigger_overrides = variant_trigger_overrides
+        self.polity_variant_map = polity_variant_map
+        self.variant_tech_ids = variant_tech_ids
+
+        self._reset_scan_reports()
 
     def _reset_scan_reports(self) -> None:
         # Tech scan
@@ -178,7 +193,9 @@ class ParserMixin:
         self._scan_technology_path(
             Path(self.config.paths.base_game_path) / "common" / "technology"
         )
-        self.base_game_tech_ids = set(self.all_technologies.keys())
+        if self.base_game_tech_ids is not None:
+            self.base_game_tech_ids.clear()
+            self.base_game_tech_ids.update(self.all_technologies.keys())
 
         workshop_root = Path(self.config.paths.mod_folder_path)
         local_mod_path = self.config.paths.local_mod_folder_path
@@ -339,14 +356,12 @@ class ParserMixin:
                 if pattern.search(trigger_block):
                     tech.variants[trigger] = swap_name
                     if swap_name:
-                        variant_ids = getattr(self, "variant_tech_ids", None)
+                        variant_ids = self.variant_tech_ids
                         if variant_ids is None:
                             variant_ids = set()
-                            setattr(self, "variant_tech_ids", variant_ids)
+                            self.variant_tech_ids = variant_ids
                         variant_ids.add(swap_name)
-                        trigger_overrides = getattr(
-                            self, "variant_trigger_overrides", None
-                        )
+                        trigger_overrides = self.variant_trigger_overrides
                         if trigger_overrides is not None:
                             trigger_overrides.setdefault(trigger, {})[tech.tech_id] = (
                                 swap_name
@@ -510,8 +525,8 @@ class ParserMixin:
         if not content:
             return
         polity_suffixes = self.config.tech.polity_description_suffixes
-        variant_set = getattr(self, "variant_tech_ids", None)
-        polity_variant_map = getattr(self, "polity_variant_map", None)
+        variant_set = self.variant_tech_ids
+        polity_variant_map = self.polity_variant_map
         for line in content.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
