@@ -74,9 +74,15 @@ def test_t_falls_back_to_english_for_missing_keys() -> None:
 def test_locale_mapping_and_default_language_selection() -> None:
     assert map_locale_to_language_key("en_US") == "english"
     assert map_locale_to_language_key("zh_CN") == "simp_chinese"
+    # Windows may provide display-name locale strings.
+    assert map_locale_to_language_key("Chinese (Simplified)_China") == "simp_chinese"
     assert map_locale_to_language_key("pt_BR.UTF-8") == "braz_por"
     # braz_por has no ui_* keys, so GUI defaults to english for clarity.
     assert default_language_from_system(locale_name="pt_BR") == "english"
+    assert (
+        default_language_from_system(locale_name="Chinese (Simplified)_China")
+        == "simp_chinese"
+    )
 
 
 def test_runtime_retranslation_updates_window_tabs_and_placeholders(

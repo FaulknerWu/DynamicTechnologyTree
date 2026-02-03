@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import locale
+import os
 from typing import Any
 
 from localization import LOCALIZATION_STRINGS
@@ -52,6 +53,26 @@ def map_locale_to_language_key(locale_name: str | None) -> str | None:
     language = parts[0].lower() if parts else ""
     region = parts[1].upper() if len(parts) >= 2 else ""
 
+    # Windows sometimes returns a display-name locale (e.g. "Chinese (Simplified)_China").
+    # Prefer mapping by name to an ISO language code, rather than truncating.
+    language_name_map = {
+        "chinese": "zh",
+        "portuguese": "pt",
+        "spanish": "es",
+        "polish": "pl",
+    }
+    for prefix, code in language_name_map.items():
+        if language.startswith(prefix):
+            language = code
+            break
+
+    # Similar Windows-style region display names.
+    region_name_map = {
+        "BRAZIL": "BR",
+        "BRASIL": "BR",
+    }
+    region = region_name_map.get(region, region)
+
     # Region-specific overrides.
     if language == "pt" and region == "BR":
         return "braz_por"
@@ -85,15 +106,16 @@ def default_language_from_system(locale_name: str | None = None) -> str:
     consistent (missing keys fall back per-string, but a global choice is clearer).
     """
 
-    system_locale = locale_name or _get_system_locale_name()
-    mapped = map_locale_to_language_key(system_locale) or "english"
+    for candidate in _iter_locale_candidates(locale_name):
+        mapped = map_locale_to_language_key(candidate)
+        if not mapped:
+            continue
+        if mapped not in LOCALIZATION_STRINGS:
+            continue
+        if _has_ui_keys(mapped):
+            return mapped
 
-    if mapped not in LOCALIZATION_STRINGS:
-        mapped = "english"
-
-    if not _has_ui_keys(mapped):
-        return "english"
-    return mapped
+    return "english"
 
 
 def _get_system_locale_name() -> str | None:
@@ -123,6 +145,98 @@ def _get_system_locale_name() -> str | None:
     if default and default[0]:
         return default[0]
     return None
+
+
+def _iter_locale_candidates(locale_name: str | None) -> list[str]:
+    """Return locale identifiers in preference order.
+
+    We intentionally try multiple sources because Windows/Python can report display-name
+    locales (e.g. "Chinese (Simplified)_China") that do not map cleanly to ISO codes.
+    """
+
+    candidates: list[str] = []
+    if locale_name:
+        candidates.append(locale_name)
+    else:
+        # Qt's system UI preference list is generally the most reliable (Qt 6's
+        # QLocale::uiLanguages includes fallbacks like zh-Hans-CN -> zh -> ...).
+        candidates.extend(_get_qt_ui_languages())
+
+        # On Windows, the UI language can differ from the numeric/formatting locale.
+        win_ui = _get_windows_ui_locale_name()
+        if win_ui:
+            candidates.append(win_ui)
+
+        env = _get_env_locale_name()
+        if env:
+            candidates.append(env)
+
+        sys_locale = _get_system_locale_name()
+        if sys_locale:
+            candidates.append(sys_locale)
+
+    # De-dupe while preserving order.
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in candidates:
+        s = str(c).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def _get_env_locale_name() -> str | None:
+    # On POSIX, LANGUAGE can contain a preference list (e.g. "zh_CN:en_US").
+    for key in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        value = os.environ.get(key)
+        if value:
+            return value.split(":", 1)[0]
+    return None
+
+
+def _get_windows_ui_locale_name() -> str | None:
+    if os.name != "nt":
+        return None
+
+    try:
+        import ctypes
+    except Exception:
+        return None
+
+    try:
+        lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+    except Exception:
+        return None
+
+    try:
+        windows_locale = getattr(locale, "windows_locale", {})
+        return windows_locale.get(lang_id)
+    except Exception:
+        return None
+
+
+def _get_qt_ui_languages() -> list[str]:
+    try:
+        from PyQt6.QtCore import QLocale
+    except Exception:
+        return []
+
+    try:
+        langs = QLocale.system().uiLanguages()
+    except Exception:
+        try:
+            langs = QLocale().uiLanguages()
+        except Exception:
+            return []
+
+    out: list[str] = []
+    for lang in langs:
+        s = str(lang).strip()
+        if s:
+            out.append(s)
+    return out
 
 
 def _has_ui_keys(lang: str) -> bool:
