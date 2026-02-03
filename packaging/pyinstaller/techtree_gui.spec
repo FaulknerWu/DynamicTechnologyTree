@@ -31,6 +31,7 @@ a = Analysis(
         "gui.path_detector",
         "gui.title_bar",
         "gui.config_editor",
+        "gui.i18n",
         "gui.main_window",
         "gui.generation_worker",
         "generator",
