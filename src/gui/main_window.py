@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from gui.config_editor import ConfigEditor
 from gui.generation_worker import GenerationWorker
+from gui.i18n import t
 from gui.title_bar import CustomTitleBar
 
 # Note: keep imports flat to match the project's packaging/runtime model.
@@ -35,7 +36,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        self.setWindowTitle("Stellaris 科技树生成器")
+        # Title is retranslated after config/language is loaded.
+        self.setWindowTitle(t("ui_app_title", "english"))
         self.setMinimumSize(700, 500)
 
         self.config_path = (
@@ -46,7 +48,18 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self.load_config()
+        self.retranslate_ui()
         self._check_and_auto_detect()
+
+    def _current_lang(self) -> str:
+        # Task constraint: read language from the combo's currentText.
+        if hasattr(self, "config_editor"):
+            lang = self.config_editor.language_combo.currentText().strip().lower()
+            return lang or "english"
+        return "english"
+
+    def _t(self, key: str, **kwargs: object) -> str:
+        return t(key, self._current_lang(), **kwargs)
 
     def _default_config_path(self) -> Path:
         frozen = getattr(sys, "frozen", False)
@@ -84,12 +97,19 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(8)
 
         self.config_editor = ConfigEditor(content_widget)
+        self.config_editor.language_combo.currentTextChanged.connect(
+            self._on_language_changed
+        )
         content_layout.addWidget(self.config_editor)
 
         controls_layout = QHBoxLayout()
-        self.generate_button = QPushButton("生成科技树", content_widget)
+        self.generate_button = QPushButton(self._t("ui_btn_generate"), content_widget)
         self.generate_button.clicked.connect(self.on_generate_clicked)
         controls_layout.addWidget(self.generate_button)
+
+        self.save_button = QPushButton(self._t("ui_btn_save_config"), content_widget)
+        self.save_button.clicked.connect(self.on_save_clicked)
+        controls_layout.addWidget(self.save_button)
 
         self.progress_bar = QProgressBar(content_widget)
         self.progress_bar.setRange(0, 100)
@@ -110,6 +130,24 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
 
+    def _on_language_changed(self, _lang_text: str) -> None:
+        self.retranslate_ui()
+
+    def retranslate_ui(self) -> None:
+        # Minimum runtime retranslation requirements for this task.
+        self.setWindowTitle(self._t("ui_app_title"))
+
+        if self.worker and self.worker.isRunning():
+            self.generate_button.setText(self._t("ui_btn_generating"))
+        else:
+            self.generate_button.setText(self._t("ui_btn_generate"))
+
+        if hasattr(self, "save_button"):
+            self.save_button.setText(self._t("ui_btn_save_config"))
+
+        # Status bar string is based on current detection state.
+        self._update_detection_status()
+
     def _toggle_max_restore(self) -> None:
         if self.isMaximized():
             self.showNormal()
@@ -129,10 +167,14 @@ class MainWindow(QMainWindow):
         self.config = configparser.ConfigParser()
         if self.config_path.exists():
             self.config.read(self.config_path, encoding="utf-8")
-            self.append_log(f"已加载配置: {self.config_path}")
-        else:
-            self.append_log(f"未找到配置文件: {self.config_path}")
         self.config_editor.load_from_config(self.config)
+
+        if self.config_path.exists():
+            self.append_log(self._t("ui_log_loaded_config", path=str(self.config_path)))
+        else:
+            self.append_log(
+                self._t("ui_log_config_not_found", path=str(self.config_path))
+            )
 
     def _check_and_auto_detect(self) -> None:
         """Auto-detect paths if required fields are empty."""
@@ -140,8 +182,8 @@ class MainWindow(QMainWindow):
         mod_path = self.config.get("paths", "mod_folder_path", fallback="").strip()
 
         if not base_path or not mod_path:
-            self.append_log("检测到首次运行或路径未配置，正在自动检测...")
-            self.status_bar.showMessage("正在自动检测路径...")
+            self.append_log(self._t("ui_log_autodetect_start"))
+            self.status_bar.showMessage(self._t("ui_status_autodetecting"))
             self.config_editor.auto_detect_all_paths()
             detected_count = sum(
                 1
@@ -153,7 +195,7 @@ class MainWindow(QMainWindow):
                 )
                 if field.text().strip()
             )
-            self.append_log(f"自动检测完成，找到 {detected_count} 个路径")
+            self.append_log(self._t("ui_log_autodetect_done", count=detected_count))
 
         self._update_detection_status()
 
@@ -162,39 +204,56 @@ class MainWindow(QMainWindow):
         mod_path = self.config_editor.mod_folder_path_input.text().strip()
 
         if base_path and mod_path:
-            self.status_bar.showMessage("已检测到必要路径")
+            self.status_bar.showMessage(self._t("ui_status_paths_ok"))
         elif mod_path:
-            self.status_bar.showMessage("已检测到 Steam 路径")
+            self.status_bar.showMessage(self._t("ui_status_steam_ok"))
         elif base_path:
-            self.status_bar.showMessage("已检测到本体路径")
+            self.status_bar.showMessage(self._t("ui_status_game_ok"))
         else:
-            self.status_bar.showMessage("请手动配置路径")
+            self.status_bar.showMessage(self._t("ui_status_need_manual_paths"))
 
     def save_config(self) -> bool:
         if not self.config_path:
-            self.append_log("未设置配置路径，无法保存。")
+            self.append_log(self._t("ui_log_no_config_path"))
             return False
         self.config_editor.save_to_config(self.config)
         try:
             with self.config_path.open("w", encoding="utf-8") as config_file:
                 self.config.write(config_file)
         except OSError as exc:
-            self.append_log(f"保存配置失败: {exc}")
-            QMessageBox.critical(self, "保存失败", f"无法写入配置文件：{exc}")
+            self.append_log(self._t("ui_log_save_failed", error=str(exc)))
+            QMessageBox.critical(
+                self,
+                self._t("ui_msgbox_title_save_failed"),
+                self._t("ui_msgbox_body_save_failed", error=str(exc)),
+            )
             return False
-        self.append_log(f"已保存配置: {self.config_path}")
+        self.append_log(self._t("ui_log_config_saved", path=str(self.config_path)))
         return True
+
+    def on_save_clicked(self) -> None:
+        valid, error_message = self.config_editor.validate()
+        if not valid:
+            QMessageBox.warning(
+                self, self._t("ui_msgbox_title_config_error"), error_message
+            )
+            return
+        self.save_config()
 
     def on_generate_clicked(self) -> None:
         valid, error_message = self.config_editor.validate()
         if not valid:
-            QMessageBox.warning(self, "配置错误", error_message)
+            QMessageBox.warning(
+                self, self._t("ui_msgbox_title_config_error"), error_message
+            )
             return
 
         if not self.save_config():
             return
         self.generate_button.setEnabled(False)
-        self.generate_button.setText("生成中...")
+        self.generate_button.setText(self._t("ui_btn_generating"))
+        self.save_button.setEnabled(False)
+        self.config_editor.language_combo.setEnabled(False)
         self.log_output.clear()
         self.progress_bar.setValue(0)
 
@@ -209,7 +268,9 @@ class MainWindow(QMainWindow):
 
     def on_generation_finished(self, success: bool, message: str) -> None:
         self.generate_button.setEnabled(True)
-        self.generate_button.setText("生成科技树")
+        self.generate_button.setText(self._t("ui_btn_generate"))
+        self.save_button.setEnabled(True)
+        self.config_editor.language_combo.setEnabled(True)
         self.progress_bar.setValue(100 if success else 0)
         if self.worker:
             self.worker.wait()
@@ -217,9 +278,17 @@ class MainWindow(QMainWindow):
             self.worker = None
 
         if success:
-            QMessageBox.information(self, "完成", "科技树生成完成！")
+            QMessageBox.information(
+                self,
+                self._t("ui_msgbox_title_done"),
+                self._t("ui_msgbox_body_generation_done"),
+            )
         else:
-            QMessageBox.critical(self, "错误", f"生成失败：{message}")
+            QMessageBox.critical(
+                self,
+                self._t("ui_msgbox_title_error"),
+                self._t("ui_msgbox_body_generation_failed", error=message),
+            )
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         if a0 is None:

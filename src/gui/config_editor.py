@@ -4,7 +4,7 @@ import configparser
 import os
 from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSignalBlocker, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from config import DisplayConfig, LocalizationConfig
+from gui.i18n import default_language_from_system, t
 from gui.path_detector import DetectedPaths, PathDetector
 from localization import LOCALIZATION_STRINGS
 
@@ -55,6 +56,8 @@ def _language_options() -> list[str]:
 
 
 class ConfigEditor(QWidget):
+    language_changed = pyqtSignal(str)
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
 
@@ -66,19 +69,107 @@ class ConfigEditor(QWidget):
         self._build_localization_tab()
         self._build_display_tab()
 
+        # Prefer a stable default language before config is loaded.
+        default_lang = default_language_from_system()
+        default_index = self.language_combo.findText(default_lang)
+        if default_index != -1:
+            self.language_combo.setCurrentIndex(default_index)
+
+        self.language_combo.currentTextChanged.connect(self._on_language_combo_changed)
+        self.retranslate_ui()
+
+    def _current_lang(self) -> str:
+        # Task constraint: derive language from the combo's currentText.
+        lang = self.language_combo.currentText().strip().lower()
+        return lang or "english"
+
+    def _t(self, key: str, **kwargs: object) -> str:
+        return t(key, self._current_lang(), **kwargs)
+
+    def _on_language_combo_changed(self, lang_text: str) -> None:
+        lang = (lang_text or "").strip().lower() or "english"
+        self.retranslate_ui()
+        self.language_changed.emit(lang)
+
+    def retranslate_ui(self) -> None:
+        lang = self._current_lang()
+
+        # Tabs
+        paths_index = self.tabs.indexOf(self.paths_tab)
+        if paths_index != -1:
+            self.tabs.setTabText(paths_index, t("ui_tab_paths", lang))
+        localization_index = self.tabs.indexOf(self.localization_tab)
+        if localization_index != -1:
+            self.tabs.setTabText(localization_index, t("ui_tab_localization", lang))
+        display_index = self.tabs.indexOf(self.display_tab)
+        if display_index != -1:
+            self.tabs.setTabText(display_index, t("ui_tab_display", lang))
+
+        # Buttons
+        self.auto_detect_all_button.setText(t("ui_btn_autodetect_all", lang))
+        for button in (
+            self.base_game_browse_button,
+            self.mod_folder_browse_button,
+            self.dlc_load_browse_button,
+            self.local_mod_browse_button,
+        ):
+            button.setText(t("ui_btn_browse", lang))
+        for button in (
+            self.base_game_detect_button,
+            self.mod_folder_detect_button,
+            self.dlc_load_detect_button,
+            self.local_mod_detect_button,
+        ):
+            button.setText(t("ui_btn_autodetect", lang))
+
+        # Form labels
+        self.base_game_path_label.setText(t("ui_label_base_game_path", lang))
+        self.mod_folder_path_label.setText(t("ui_label_workshop_path", lang))
+        self.dlc_load_path_label.setText(t("ui_label_dlc_load_path_optional", lang))
+        self.local_mod_path_label.setText(t("ui_label_local_mod_path_optional", lang))
+
+        self.language_label.setText(t("ui_label_language", lang))
+        self.priority_mods_label.setText(t("ui_label_priority_mods", lang))
+
+        self.max_children_label.setText(t("ui_label_max_children", lang))
+        self.max_depth_label.setText(t("ui_label_max_depth", lang))
+        self.max_nodes_label.setText(t("ui_label_max_nodes", lang))
+
+        # Placeholders
+        self.priority_mods_input.setPlaceholderText(
+            t("ui_placeholder_priority_mods", lang)
+        )
+
+        # Status tooltips
+        self._update_path_status(
+            self.base_game_status_label, self.base_game_path_input.text(), lang
+        )
+        self._update_path_status(
+            self.mod_folder_status_label, self.mod_folder_path_input.text(), lang
+        )
+        self._update_path_status(
+            self.dlc_load_status_label, self.dlc_load_path_input.text(), lang
+        )
+        self._update_path_status(
+            self.local_mod_status_label,
+            self.local_mod_folder_path_input.text(),
+            lang,
+        )
+
     def _build_paths_tab(self) -> None:
         tab = QWidget(self)
+        self.paths_tab = tab
         layout = QVBoxLayout(tab)
         layout.setSpacing(8)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        auto_detect_button = QPushButton("自动检测所有路径", tab)
-        self._style_action_button(auto_detect_button)
-        auto_detect_button.clicked.connect(self.auto_detect_all_paths)
+        self.auto_detect_all_button = QPushButton(tab)
+        self._style_action_button(self.auto_detect_all_button)
+        self.auto_detect_all_button.clicked.connect(self.auto_detect_all_paths)
 
         auto_row = QHBoxLayout()
         auto_row.setContentsMargins(0, 0, 0, 0)
-        auto_row.addWidget(auto_detect_button)
+        auto_row.addWidget(self.auto_detect_all_button)
         auto_row.addStretch()
         layout.addLayout(auto_row)
 
@@ -86,89 +177,123 @@ class ConfigEditor(QWidget):
         form.setSpacing(10)
         layout.addLayout(form)
 
-        base_row, self.base_game_path_input = self._create_path_row(
-            "选择群星本体安装目录",
+        (
+            base_row,
+            self.base_game_path_input,
+            self.base_game_browse_button,
+            self.base_game_detect_button,
+            self.base_game_status_label,
+        ) = self._create_path_row(
+            "ui_dialog_title_choose_base_game_dir",
             is_file=False,
             detect_callback=self._detect_game_path,
         )
-        form.addRow("本体安装目录", base_row)
+        self.base_game_path_label = QLabel(tab)
+        form.addRow(self.base_game_path_label, base_row)
 
-        mod_row, self.mod_folder_path_input = self._create_path_row(
-            "选择 Steam 创意工坊目录",
+        (
+            mod_row,
+            self.mod_folder_path_input,
+            self.mod_folder_browse_button,
+            self.mod_folder_detect_button,
+            self.mod_folder_status_label,
+        ) = self._create_path_row(
+            "ui_dialog_title_choose_workshop_dir",
             is_file=False,
             detect_callback=self._detect_workshop_path,
         )
-        form.addRow("创意工坊目录", mod_row)
+        self.mod_folder_path_label = QLabel(tab)
+        form.addRow(self.mod_folder_path_label, mod_row)
 
-        dlc_row, self.dlc_load_path_input = self._create_path_row(
-            "选择 dlc_load.json",
+        (
+            dlc_row,
+            self.dlc_load_path_input,
+            self.dlc_load_browse_button,
+            self.dlc_load_detect_button,
+            self.dlc_load_status_label,
+        ) = self._create_path_row(
+            "ui_dialog_title_choose_dlc_load",
             is_file=True,
-            file_filter="JSON Files (*.json);;All Files (*)",
+            file_filter_key="ui_file_filter_json",
             detect_callback=self._detect_dlc_load_path,
         )
-        form.addRow("dlc_load.json（可选）", dlc_row)
+        self.dlc_load_path_label = QLabel(tab)
+        form.addRow(self.dlc_load_path_label, dlc_row)
 
-        local_mod_row, self.local_mod_folder_path_input = self._create_path_row(
-            "选择本地 MOD 目录",
+        (
+            local_mod_row,
+            self.local_mod_folder_path_input,
+            self.local_mod_browse_button,
+            self.local_mod_detect_button,
+            self.local_mod_status_label,
+        ) = self._create_path_row(
+            "ui_dialog_title_choose_local_mod_dir",
             is_file=False,
             detect_callback=self._detect_local_mod_path,
         )
-        form.addRow("本地 MOD 目录（可选）", local_mod_row)
+        self.local_mod_path_label = QLabel(tab)
+        form.addRow(self.local_mod_path_label, local_mod_row)
 
-        self.tabs.addTab(tab, "路径设置")
+        self.tabs.addTab(tab, "")
 
     def _build_localization_tab(self) -> None:
         tab = QWidget(self)
+        self.localization_tab = tab
         form = QFormLayout(tab)
 
         self.language_combo = QComboBox(tab)
         self.language_combo.addItems(_language_options())
-        form.addRow("语言", self.language_combo)
+        self.language_label = QLabel(tab)
+        form.addRow(self.language_label, self.language_combo)
 
         self.priority_mods_input = QLineEdit(tab)
-        self.priority_mods_input.setPlaceholderText("例如: 2131014154,2131014155")
-        form.addRow("优先 MOD 列表", self.priority_mods_input)
+        self.priority_mods_label = QLabel(tab)
+        form.addRow(self.priority_mods_label, self.priority_mods_input)
 
-        self.tabs.addTab(tab, "本地化设置")
+        self.tabs.addTab(tab, "")
 
     def _build_display_tab(self) -> None:
         tab = QWidget(self)
+        self.display_tab = tab
         form = QFormLayout(tab)
 
         self.max_children_spin = QSpinBox(tab)
         self.max_children_spin.setRange(0, 999)
-        form.addRow("最大子节点数 (0 = 无限制)", self.max_children_spin)
+        self.max_children_label = QLabel(tab)
+        form.addRow(self.max_children_label, self.max_children_spin)
 
         self.max_depth_spin = QSpinBox(tab)
         self.max_depth_spin.setRange(0, 99)
-        form.addRow("最大树深度 (0 = 无限制)", self.max_depth_spin)
+        self.max_depth_label = QLabel(tab)
+        form.addRow(self.max_depth_label, self.max_depth_spin)
 
         self.max_nodes_spin = QSpinBox(tab)
         self.max_nodes_spin.setRange(0, 9999)
-        form.addRow("最大显示节点数 (0 = 无限制)", self.max_nodes_spin)
+        self.max_nodes_label = QLabel(tab)
+        form.addRow(self.max_nodes_label, self.max_nodes_spin)
 
-        self.tabs.addTab(tab, "显示设置")
+        self.tabs.addTab(tab, "")
 
     def _create_path_row(
         self,
-        dialog_title: str,
+        dialog_title_key: str,
         *,
         is_file: bool,
-        file_filter: str = "All Files (*)",
+        file_filter_key: str = "ui_file_filter_all",
         detect_callback: Optional[Callable[[], str | None]] = None,
-    ) -> tuple[QWidget, QLineEdit]:
+    ) -> tuple[QWidget, QLineEdit, QPushButton, QPushButton, QLabel]:
         container = QWidget(self)
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
         line_edit = QLineEdit(container)
-        browse_button = QPushButton("浏览...", container)
-        detect_button = QPushButton("自动检测", container)
+        browse_button = QPushButton(container)
+        detect_button = QPushButton(container)
         status_label = QLabel("?", container)
         status_label.setFixedWidth(20)
         status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._update_path_status(status_label, line_edit.text())
+        self._update_path_status(status_label, line_edit.text(), "english")
 
         self._style_action_button(browse_button)
         self._style_action_button(detect_button)
@@ -180,32 +305,49 @@ class ConfigEditor(QWidget):
 
         if is_file:
             browse_button.clicked.connect(
-                lambda: self._browse_file(line_edit, dialog_title, file_filter)
+                lambda _checked=False: self._browse_file(
+                    line_edit, dialog_title_key, file_filter_key
+                )
             )
         else:
             browse_button.clicked.connect(
-                lambda: self._browse_folder(line_edit, dialog_title)
+                lambda _checked=False: self._browse_folder(line_edit, dialog_title_key)
             )
 
         line_edit.textChanged.connect(
-            lambda text: self._update_path_status(status_label, text)
+            lambda text: self._update_path_status(
+                status_label, text, self._current_lang()
+            )
         )
         if detect_callback is not None:
             detect_button.clicked.connect(
-                lambda: self._apply_detected_path(line_edit, detect_callback)
+                lambda _checked=False: self._apply_detected_path(
+                    line_edit, detect_callback
+                )
             )
+        else:
+            detect_button.setEnabled(False)
 
-        return container, line_edit
+        return container, line_edit, browse_button, detect_button, status_label
 
-    def _browse_folder(self, target: QLineEdit, title: str) -> None:
+    def _browse_folder(self, target: QLineEdit, title_key: str) -> None:
         start_dir = target.text().strip()
-        directory = QFileDialog.getExistingDirectory(self, title, start_dir)
+        directory = QFileDialog.getExistingDirectory(
+            self, self._t(title_key), start_dir
+        )
         if directory:
             target.setText(directory)
 
-    def _browse_file(self, target: QLineEdit, title: str, file_filter: str) -> None:
+    def _browse_file(
+        self, target: QLineEdit, title_key: str, file_filter_key: str
+    ) -> None:
         start_dir = target.text().strip()
-        file_path, _ = QFileDialog.getOpenFileName(self, title, start_dir, file_filter)
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            self._t(title_key),
+            start_dir,
+            self._t(file_filter_key),
+        )
         if file_path:
             target.setText(file_path)
 
@@ -226,17 +368,9 @@ class ConfigEditor(QWidget):
             config.get("paths", "local_mod_folder_path", fallback="").strip()
         )
 
-        language = (
-            config.get(
-                "localization",
-                "language",
-                fallback=default_loc.target_language_code,
-            )
-            .strip()
-            .lower()
-        )
-        if not language:
-            language = default_loc.target_language_code
+        language = config.get("localization", "language", fallback="").strip().lower()
+        if not language or language not in LOCALIZATION_STRINGS:
+            language = default_language_from_system()
         language_index = self.language_combo.findText(language)
         if language_index == -1:
             language_index = self.language_combo.findText(
@@ -244,7 +378,9 @@ class ConfigEditor(QWidget):
             )
         if language_index == -1:
             language_index = 0
-        self.language_combo.setCurrentIndex(language_index)
+        with QSignalBlocker(self.language_combo):
+            self.language_combo.setCurrentIndex(language_index)
+        self.retranslate_ui()
 
         self.priority_mods_input.setText(
             config.get(
@@ -306,14 +442,19 @@ class ConfigEditor(QWidget):
         config.set("display", "max_display_nodes", str(self.max_nodes_spin.value()))
 
     def validate(self) -> tuple[bool, str]:
-        missing_fields = []
+        lang = self._current_lang()
+        missing_fields: list[str] = []
         if not self.base_game_path_input.text().strip():
-            missing_fields.append("本体安装目录")
+            missing_fields.append(t("ui_field_base_game_path", lang))
         if not self.mod_folder_path_input.text().strip():
-            missing_fields.append("创意工坊目录")
+            missing_fields.append(t("ui_field_workshop_path", lang))
 
         if missing_fields:
-            return False, f"路径设置缺少必填项: {', '.join(missing_fields)}"
+            return False, t(
+                "ui_error_missing_required_paths",
+                lang,
+                fields=", ".join(missing_fields),
+            )
         return True, ""
 
     def auto_detect_all_paths(self) -> None:
@@ -357,12 +498,12 @@ class ConfigEditor(QWidget):
         return PathDetector().detect_local_mod_path()
 
     @staticmethod
-    def _update_path_status(label: QLabel, path_text: str) -> None:
+    def _update_path_status(label: QLabel, path_text: str, lang: str) -> None:
         path = path_text.strip()
         label.setCursor(Qt.CursorShape.WhatsThisCursor)
         if not path:
             label.setText("?")
-            label.setToolTip("未设置路径")
+            label.setToolTip(t("ui_tooltip_path_not_set", lang))
             label.setStyleSheet("""
                 QLabel {
                     color: #9e9e9e;
@@ -376,7 +517,7 @@ class ConfigEditor(QWidget):
             """)
         elif os.path.exists(path):
             label.setText("✓")
-            label.setToolTip(f"路径有效: {path}")
+            label.setToolTip(t("ui_tooltip_path_valid", lang, path=path))
             label.setStyleSheet("""
                 QLabel {
                     color: #2e7d32;
@@ -390,7 +531,7 @@ class ConfigEditor(QWidget):
             """)
         else:
             label.setText("✗")
-            label.setToolTip(f"路径不存在: {path}")
+            label.setToolTip(t("ui_tooltip_path_missing", lang, path=path))
             label.setStyleSheet("""
                 QLabel {
                     color: #c62828;

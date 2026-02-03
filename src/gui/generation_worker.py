@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import configparser
 import io
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from threading import Event
 
 from PyQt6.QtCore import QThread, pyqtSignal
+
+from gui.i18n import LOCALIZATION_STRINGS, default_language_from_system, t
 
 
 class SignalWriter(io.StringIO):
@@ -39,8 +42,9 @@ class GenerationWorker(QThread):
         self._saw_generation_done = False
 
     def run(self) -> None:
+        lang = self._ui_language()
         if self._cancelled.is_set():
-            self.finished.emit(False, "Generation cancelled.")
+            self.finished.emit(False, t("ui_worker_generation_cancelled", lang))
             return
 
         try:
@@ -62,11 +66,36 @@ class GenerationWorker(QThread):
             if self._saw_generation_done:
                 self.finished.emit(True, "")
             else:
-                self.finished.emit(False, "Generation did not complete.")
+                self.finished.emit(False, t("ui_worker_generation_incomplete", lang))
         except Exception as exc:  # pragma: no cover - GUI error handling
             # Preserve traceback for debugging when the failure happens before stdout/stderr redirection.
             self.log_message.emit(traceback.format_exc().rstrip())
             self.finished.emit(False, str(exc))
+
+    def _ui_language(self) -> str:
+        """Return a best-effort GUI language key derived from config.ini.
+
+        Prefer the user's configured Stellaris language when valid; otherwise fall
+        back to a system-derived UI language.
+        """
+
+        fallback = default_language_from_system()
+        try:
+            parser = configparser.ConfigParser()
+            read_files = parser.read(self.config_path, encoding="utf-8-sig")
+            if not read_files:
+                return fallback
+
+            candidate = (
+                parser.get("localization", "language", fallback="").strip().lower()
+            )
+            if not candidate:
+                return fallback
+            if candidate not in LOCALIZATION_STRINGS:
+                return fallback
+            return candidate
+        except Exception:
+            return fallback
 
     def cancel(self) -> None:
         self._cancelled.set()
