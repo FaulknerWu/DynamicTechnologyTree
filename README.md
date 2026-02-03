@@ -1,6 +1,6 @@
 # Dynamic Technology Tree（Stellaris 科技树本地化生成器）
 
-![Dynamic Technology Tree](thumbnail.jpg)
+![Dynamic Technology Tree](thumbnail.jpeg)
 
 这是一个 Python 3.10+ 的生成器：扫描 Stellaris 的科技定义与本地化文件，然后输出 Stellaris 可读取的本地化 `.yml` 文件，在游戏内展示格式化后的“科技树”字符串。
 
