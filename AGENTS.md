@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-02-02T13:08:50Z
-**Commit:** 544187b
+**Generated:** 2026-02-02T18:38:48Z
+**Commit:** 109b1b4
 **Branch:** main
 
 complexity: 3/5
@@ -43,6 +43,7 @@ Python 3.10+ app that generates Stellaris tech-tree localization output for the 
 | GUI generation thread | `src/gui/generation_worker.py:26` | Redirects stdout/stderr and derives progress from log markers |
 | Path auto-detect | `src/gui/path_detector.py:24` | Steam/game/workshop/user-data detection |
 | Test entrypoint | `tests/test_smoke.py:25` | Minimal smoke test around generator scan/relationship/description |
+| Golden output regression | `tests/test_golden_output.py:35` | End-to-end fixture run; compares generated YML bytes to committed snapshots |
 
 ## CODE MAP
 | Symbol | Type | Location | Role |
@@ -69,7 +70,7 @@ Python 3.10+ app that generates Stellaris tech-tree localization output for the 
 - Outputs: generated mod content folders are ignored (`.gitignore:30`).
 
 ## ANTI-PATTERNS (THIS PROJECT)
-- Silent exception swallowing: `except Exception: pass` exists when tagging overlong roots (`src/dtt_core/render.py:82`).
+- Silent exception swallowing: `except Exception: pass` exists when tagging overlong roots (`src/dtt_core/render.py:489`).
 - Silent data loss during reads: `read_text(..., errors="ignore")` is used when scanning/parsing; prefer surfacing failures (not silently dropping bytes).
 - Hidden path-detection failures: `PathDetector` may `except OSError: return []` (no warning) when reading Steam metadata (`src/gui/path_detector.py`).
 - Adding extra launchers: prefer `dtt-gui` as the primary entrypoint; keep `python -m gui` for module execution/PyInstaller analysis only.
@@ -93,10 +94,12 @@ pyinstaller packaging/pyinstaller/techtree_gui.spec
 
 ## NOTES
 - No CI config in this checkout (`.github/workflows` absent).
-- Tests exist but coverage is minimal (`tests/test_smoke.py`).
+- Tests exist but coverage is small (smoke + golden snapshots).
 
 ## LOCAL AGENTS
 - `src/AGENTS.md`
+- `src/dtt_core/AGENTS.md`
 - `src/gui/AGENTS.md`
 - `tests/AGENTS.md`
 - `build/AGENTS.md`
+- `packaging/pyinstaller/AGENTS.md`
