@@ -40,6 +40,13 @@ class TreeRenderer:
     MAX_PREREQ_DISPLAY = 2
     ELLIPSIS = "…"
 
+    # Some Stellaris UI fonts (notably the Latin set) don't include Unicode
+    # box-drawing glyphs (U+2500..U+257F), rendering them as "??".
+    # Stick to plain ASCII so the tech tree prefix always displays.
+    TREE_BAR = "|   "
+    TREE_EMPTY = "    "
+    TREE_BRANCH = "|-"
+
     def __init__(
         self,
         all_technologies: Dict[str, Technology],
@@ -84,11 +91,11 @@ class TreeRenderer:
             display_overrides.get(tech_id, tech_id) if display_overrides else tech_id
         )
         prefix_parts = (
-            ["│   " if keep else "    " for keep in prefix_bars[:-1]]
+            [self.TREE_BAR if keep else self.TREE_EMPTY for keep in prefix_bars[:-1]]
             if prefix_bars
             else []
         )
-        branch_symbol = "└─" if is_last else "├─"
+        branch_symbol = self.TREE_BRANCH
         line_prefix = "".join(prefix_parts) + branch_symbol
         formatted = self._format_single_tech(tech, display_id)
         additional_prereqs = []
@@ -350,10 +357,12 @@ class TreeRenderer:
             )
             state.overflow = True
             if not ctx.suppress_overflow_line:
-                prefix_parts = ["│   " if keep else "    " for keep in prefix_bars]
+                prefix_parts = [
+                    self.TREE_BAR if keep else self.TREE_EMPTY for keep in prefix_bars
+                ]
                 state.lines.append(
                     "".join(prefix_parts)
-                    + "└─"
+                    + self.TREE_BRANCH
                     + self.ELLIPSIS
                     + ctx.global_overflow_tpl.format(count=more)
                 )
@@ -408,10 +417,12 @@ class TreeRenderer:
     ) -> None:
         if hidden <= 0:
             return
-        prefix_parts = ["│   " if keep else "    " for keep in prefix_bars]
+        prefix_parts = [
+            self.TREE_BAR if keep else self.TREE_EMPTY for keep in prefix_bars
+        ]
         state.lines.append(
             "".join(prefix_parts)
-            + "└─"
+            + self.TREE_BRANCH
             + self.ELLIPSIS
             + ctx.folded_more_tpl.format(count=hidden)
         )
@@ -496,7 +507,7 @@ class TreeRenderer:
             lang_code, self.localization_strings["english"]
         )
         msg = strings.get("root_children_exceed_limit", "Root children exceed limit")
-        content = f"{header}\n└─§R{msg}§!"
+        content = f"{header}\n{self.TREE_BRANCH}§R{msg}§!"
         return content.replace("\n", "\\n")
 
     def _get_raw_render_params(self, tech_id: str) -> Tuple[int, int]:
