@@ -14,9 +14,6 @@ from models import Technology
 
 
 class TechTreeGenerator:
-    MAX_PREREQ_DISPLAY = TreeRenderer.MAX_PREREQ_DISPLAY
-    ELLIPSIS = TreeRenderer.ELLIPSIS
-
     def __init__(self, config_path: str):
         self.all_technologies: Dict[str, Technology] = {}
         self.base_game_tech_ids = set()

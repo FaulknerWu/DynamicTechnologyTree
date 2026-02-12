@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,34 +39,9 @@ class PathDetector:
         )
 
     def detect_steam_path(self) -> str | None:
-        if os.name == "nt":
-            return self._detect_steam_path_windows()
-        if sys.platform == "darwin":
-            return self._first_existing_path(
-                [Path.home() / "Library" / "Application Support" / "Steam"]
-            )
-        return self._first_existing_path(
-            [
-                Path.home() / ".local" / "share" / "Steam",
-                Path.home() / ".steam" / "steam",
-                Path.home() / ".steam" / "root",
-                Path.home()
-                / ".var"
-                / "app"
-                / "com.valvesoftware.Steam"
-                / ".local"
-                / "share"
-                / "Steam",
-                Path.home() / "snap" / "steam" / "common" / ".steam" / "steam",
-                Path.home()
-                / "snap"
-                / "steam"
-                / "common"
-                / ".local"
-                / "share"
-                / "Steam",
-            ]
-        )
+        if os.name != "nt":
+            return None
+        return self._detect_steam_path_windows()
 
     def detect_game_path(self) -> str | None:
         library_paths = self._steam_library_paths(self.detect_steam_path())
@@ -89,17 +63,7 @@ class PathDetector:
 
     def _user_data_candidates(self) -> list[Path]:
         home = Path.home()
-        if os.name == "nt":
-            return [home / "Documents" / USER_DATA_SUBPATH]
-        if sys.platform == "darwin":
-            return [
-                home / "Documents" / USER_DATA_SUBPATH,
-                home / "Library" / "Application Support" / USER_DATA_SUBPATH,
-            ]
-        return [
-            home / ".local" / "share" / USER_DATA_SUBPATH,
-            home / "Documents" / USER_DATA_SUBPATH,
-        ]
+        return [home / "Documents" / USER_DATA_SUBPATH]
 
     def _detect_dlc_load_path(self, user_data_path: str | None) -> str | None:
         if not user_data_path:

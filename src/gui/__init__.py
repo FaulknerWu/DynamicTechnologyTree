@@ -24,9 +24,7 @@ class RuntimePaths:
 
 def _find_project_root(start: Path) -> Path | None:
     for candidate in [start, *start.parents]:
-        if (candidate / "pyproject.toml").exists() or (
-            candidate / "descriptor.mod"
-        ).exists():
+        if (candidate / "pyproject.toml").exists():
             return candidate
     return None
 

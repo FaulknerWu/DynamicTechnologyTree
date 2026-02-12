@@ -98,7 +98,7 @@ class MainWindow(QMainWindow):
 
         self.config_editor = ConfigEditor(content_widget)
         self.config_editor.language_combo.currentTextChanged.connect(
-            self._on_language_changed
+            self._on_language_selection
         )
         content_layout.addWidget(self.config_editor)
 
@@ -130,7 +130,7 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
 
-    def _on_language_changed(self, _lang_text: str) -> None:
+    def _on_language_selection(self, _lang_text: str) -> None:
         self.retranslate_ui()
 
     def retranslate_ui(self) -> None:

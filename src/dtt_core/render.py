@@ -494,11 +494,8 @@ class TreeRenderer:
         root = self.all_technologies[tech_id]
         root_children_count = len(root.unlocked_tech_ids)
         if T > 0 and root_children_count > T:
-            try:
-                if self.overlong_tech_ids is not None:
-                    self.overlong_tech_ids.add(tech_id)
-            except Exception:
-                pass
+            if self.overlong_tech_ids is not None:
+                self.overlong_tech_ids.add(tech_id)
             return True
         return False
 
@@ -577,7 +574,7 @@ class TreeRenderer:
             return self._format_root_overflow_message(header, lang_code)
 
         raw_x, raw_y = self._get_raw_render_params(tech_id)
-        lines_stage_probe, overflow_stage_probe = self._render_tree_with_limits(
+        _, overflow_stage_probe = self._render_tree_with_limits(
             tech_id,
             raw_x,
             raw_y,

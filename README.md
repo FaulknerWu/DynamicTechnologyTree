@@ -12,7 +12,7 @@
 - **主要使用方式**：**PyQt6** 图形界面（GUI，唯一支持的使用方式）。
 - **核心流水线**：`TechTreeGenerator`（`src/generator.py`）。
 - **输出位置**：默认写到当前工作目录下的 `localisation/`（见 `src/dtt_core/output.py`）。
-- **目标 Stellaris 版本**：`v4.2.*`（见 `descriptor.mod`）。
+- **目标 Stellaris 版本**：`v4.2.*`。
 
 ## 功能特性
 
@@ -143,10 +143,6 @@ Pytest 配置在 `pyproject.toml` 中，测试位于 `tests/`：
 ```bash
 python -m pytest
 ```
-
-### 类型检查
-
-`pyproject.toml` 中存在 `pyright` 配置块，但 `dev` extra 并未安装 `pyright`。
 
 ## Windows 打包
 

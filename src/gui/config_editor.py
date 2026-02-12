@@ -4,7 +4,7 @@ import configparser
 import os
 from typing import Callable, Optional
 
-from PyQt6.QtCore import QSignalBlocker, Qt, pyqtSignal
+from PyQt6.QtCore import QSignalBlocker, Qt
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -56,8 +56,6 @@ def _language_options() -> list[str]:
 
 
 class ConfigEditor(QWidget):
-    language_changed = pyqtSignal(str)
-
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
 
@@ -86,10 +84,8 @@ class ConfigEditor(QWidget):
     def _t(self, key: str, **kwargs: object) -> str:
         return t(key, self._current_lang(), **kwargs)
 
-    def _on_language_combo_changed(self, lang_text: str) -> None:
-        lang = (lang_text or "").strip().lower() or "english"
+    def _on_language_combo_changed(self, _lang_text: str) -> None:
         self.retranslate_ui()
-        self.language_changed.emit(lang)
 
     def retranslate_ui(self) -> None:
         lang = self._current_lang()

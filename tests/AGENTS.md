@@ -6,7 +6,7 @@ scope: tests/*
 inherits: ../AGENTS.md
 
 ## OVERVIEW
-Pytest-based smoke + golden regression coverage for the generator; tests run from a repo checkout without requiring an editable install.
+Pytest-based smoke + golden regression coverage for the generator plus offscreen GUI/i18n coverage; tests run from a repo checkout without requiring an editable install.
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
@@ -14,6 +14,7 @@ Pytest-based smoke + golden regression coverage for the generator; tests run fro
 | Path injection | `tests/conftest.py:7` | Prepends `src/` to `sys.path` so tests can `import generator` |
 | Smoke test | `tests/test_smoke.py:25` | Writes temp `config.ini`, runs basic pipeline stages, asserts no techs |
 | Golden output regression | `tests/test_golden_output.py:35` | Runs end-to-end fixture pipeline; asserts output bytes match committed snapshots |
+| GUI i18n + runtime retranslation | `tests/test_gui_i18n.py:88` | Runs PyQt6 in offscreen mode; validates locale mapping/fallbacks, runtime UI retranslation, config language persistence, and language lock while generation is active |
 | Pytest config | `pyproject.toml:29` | `testpaths=["tests"]`, `python_files=test_*.py` |
 
 ## CONVENTIONS

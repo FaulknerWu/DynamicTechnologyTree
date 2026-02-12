@@ -15,7 +15,6 @@ Python 3.10+ app that generates Stellaris tech-tree localization output for the 
 ```
 ./
 |-- pyproject.toml                 # packaging + entrypoint + pytest config
-|-- descriptor.mod                 # Stellaris mod metadata (version, workshop id)
 |-- README.md                      # usage (GUI-only), config.ini schema, build notes
 |-- packaging/
 |   `-- pyinstaller/
@@ -74,7 +73,7 @@ Python 3.10+ app that generates Stellaris tech-tree localization output for the 
 - Silent data loss during reads: `read_text(..., errors="ignore")` is used when scanning/parsing; prefer surfacing failures (not silently dropping bytes).
 - Hidden path-detection failures: `PathDetector` may `except OSError: return []` (no warning) when reading Steam metadata (`src/gui/path_detector.py`).
 - Adding extra launchers: prefer `dtt-gui` as the primary entrypoint; keep `python -m gui` for module execution/PyInstaller analysis only.
-- Version drift on release: keep `descriptor.mod:1` and `pyproject.toml:7` aligned.
+- Version drift on release: keep `pyproject.toml:7` aligned with release tagging/docs.
 - Committing build artifacts: `dist/`/`build/`/`*.exe` are ignored (`.gitignore:13`); prefer keeping them out of git history.
 
 ## COMMANDS

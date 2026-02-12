@@ -1,5 +1,4 @@
 import json
-import os
 import configparser
 from pathlib import Path
 from typing import List, Optional
@@ -46,21 +45,13 @@ class ConfigLoader:
             )
             raise ValueError(msg_template.format(error=e))
         if not dlc_path_cfg:
-            if os.name == "nt":
-                dlc_path = str(
-                    Path.home()
-                    / "Documents"
-                    / "Paradox Interactive"
-                    / "Stellaris"
-                    / "dlc_load.json"
-                )
-            else:
-                print(
-                    self._localization_strings["english"].get(
-                        "hint_missing_dlc_path_non_windows"
-                    )
-                )
-                dlc_path = ""
+            dlc_path = str(
+                Path.home()
+                / "Documents"
+                / "Paradox Interactive"
+                / "Stellaris"
+                / "dlc_load.json"
+            )
         else:
             dlc_path = dlc_path_cfg
         if not config.has_section("localization"):

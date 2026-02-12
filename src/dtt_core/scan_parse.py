@@ -18,9 +18,6 @@ class FileReadError(RuntimeError):
 class ScanParseCore:
     TECH_DEFINITION_REGEX = re.compile(r"(?m)^(\w+)\s*=\s*\{")
     PREREQUISITES_REGEX = re.compile(r"prerequisites\s*=\s*\{")
-    COST_REGEX = re.compile(r"cost\s*=\s*([@\w\d]+)")
-    CATEGORY_REGEX = re.compile(r"category\s*=\s*\{")
-    POTENTIAL_REGEX = re.compile(r"(?:potential|starting_potential)\s*=\s*\{")
     DANGEROUS_TECH_REGEX = re.compile(r"is_dangerous\s*=\s*yes")
     REPEATABLE_TECH_REGEX = re.compile(r"is_repeatable\s*=\s*yes")
     TECH_SWAP_REGEX = re.compile(r"technology_swap\s*=\s*\{")
@@ -30,21 +27,12 @@ class ScanParseCore:
     TIER_REGEX = re.compile(r"tier\s*=\s*(\d+)")
     STARTING_TECH_REGEX = re.compile(r"start_tech\s*=\s*yes")
     TECH_ID_REGEX = re.compile(r'"([^"]+)"|(\w+)')
-    WORD_REGEX = re.compile(r"[\w_]+")
     DESCRIPTION_LOCALIZATION_REGEX = re.compile(
         r'^\s*([a-zA-Z0-9_]+_desc(?:_[a-zA-Z0-9_]+)*):(?:\d+)?\s*"([^\"]*(?:\\.[^\"]*)*)"',
         re.IGNORECASE,
     )
     WHITESPACE_CLEANUP_REGEX = re.compile(r"\s+")
     LEVELS_REGEX = re.compile(r"levels\s*=\s*(-?\d+)")
-    COST_PER_LEVEL_REGEX = re.compile(r"cost_per_level\s*=\s*([@\w\.\-]+)")
-    WEIGHT_REGEX = re.compile(r"\bweight\s*=\s*([@\w\.\-]+)")
-    GATEWAY_REGEX = re.compile(r'\bgateway\s*=\s*(?:"([^"\n]+)"|([@\w\.]+))')
-    FEATURE_FLAGS_REGEX = re.compile(r"feature_flags\s*=\s*\{")
-    WEIGHT_GROUPS_REGEX = re.compile(r"weight_groups\s*=\s*\{")
-    MOD_WEIGHT_GROUP_REGEX = re.compile(r"mod_weight_if_group_picked\s*=\s*\{")
-    WEIGHT_MODIFIER_REGEX = re.compile(r"weight_modifier\s*=\s*\{")
-    AI_WEIGHT_REGEX = re.compile(r"ai_weight\s*=\s*\{")
 
     # Avoid log spam: keep only the first few failures per scan.
     _MAX_FAILURE_EXAMPLES = 10
@@ -202,15 +190,13 @@ class ScanParseCore:
         local_root = Path(local_mod_path) if local_mod_path else None
         scanned_count = 0
         missing_mod_dirs: List[str] = []
-        missing_tech_dirs: List[str] = []
 
         def process_mod_roots(mod_ids: List[str], root: Optional[Path]):
             nonlocal scanned_count
-            paths, missing_mods, missing_subs = self._collect_mod_subdirs(
+            paths, missing_mods, _ = self._collect_mod_subdirs(
                 mod_ids, root, ("common", "technology")
             )
             missing_mod_dirs.extend(missing_mods)
-            missing_tech_dirs.extend(missing_subs)
             for _, tech_path in paths:
                 new_techs = self._scan_technology_path(tech_path)
                 if new_techs > 0:
@@ -371,14 +357,11 @@ class ScanParseCore:
     def _parse_tech_block_content(self, tech: Technology, content: str):
         """Parse technology block and populate tech attributes."""
         self._parse_basic_attributes(tech, content)
-        self._parse_cost_and_levels(tech, content)
-        self._parse_weight_attributes(tech, content)
-        self._parse_complex_blocks(tech, content)
+        self._parse_levels_repeatable_flag(tech, content)
         self._parse_boolean_flags(tech, content)
         self._parse_variant_swaps(tech, content)
 
     def _parse_basic_attributes(self, tech: Technology, content: str) -> None:
-        """Parse: area, tier, prerequisites, categories, potential/unlock_conditions."""
         if area_match := self.RESEARCH_AREA_REGEX.search(content):
             tech.research_area = area_match.group(1)
         if tier_match := self.TIER_REGEX.search(content):
@@ -391,58 +374,15 @@ class ScanParseCore:
             ]
         if self.STARTING_TECH_REGEX.search(content):
             tech.prerequisite_tech_ids = []
-        if cat_m := self.CATEGORY_REGEX.search(content):
-            cat_block = self._extract_braced_block(content, cat_m.end())
-            tech.tech_categories = [c for c in self.WORD_REGEX.findall(cat_block)]
-        if pot_m := self.POTENTIAL_REGEX.search(content):
-            pot_block = self._extract_braced_block(content, pot_m.end())
-            tech.unlock_conditions = [p for p in self.WORD_REGEX.findall(pot_block)]
 
-    def _parse_cost_and_levels(self, tech: Technology, content: str) -> None:
-        """Parse: cost, levels, cost_per_level, gateway."""
-        if cost_match := self.COST_REGEX.search(content):
-            tech.research_cost = cost_match.group(1)
+    def _parse_levels_repeatable_flag(self, tech: Technology, content: str) -> None:
         if levels_match := self.LEVELS_REGEX.search(content):
             try:
-                tech.levels = int(levels_match.group(1))
+                levels = int(levels_match.group(1))
             except ValueError:
-                tech.levels = None
-            if tech.levels == -1:
+                levels = None
+            if levels == -1:
                 tech.is_repeatable_tech = True
-        if cpl_match := self.COST_PER_LEVEL_REGEX.search(content):
-            tech.cost_per_level = cpl_match.group(1)
-        if gateway_match := self.GATEWAY_REGEX.search(content):
-            tech.gateway = gateway_match.group(1) or gateway_match.group(2) or ""
-
-    def _parse_weight_attributes(self, tech: Technology, content: str) -> None:
-        """Parse: weight, weight_groups, mod_weight_if_group_picked."""
-        if weight_match := self.WEIGHT_REGEX.search(content):
-            tech.weight = weight_match.group(1)
-        if wg_match := self.WEIGHT_GROUPS_REGEX.search(content):
-            wg_block = self._extract_braced_block(content, wg_match.end())
-            if wg_block:
-                tech.weight_groups = self.WORD_REGEX.findall(wg_block)
-        if mw_match := self.MOD_WEIGHT_GROUP_REGEX.search(content):
-            mw_block = self._extract_braced_block(content, mw_match.end())
-            if mw_block:
-                tech.mod_weight_if_group_picked = self._parse_simple_assignment_block(
-                    mw_block
-                )
-
-    def _parse_complex_blocks(self, tech: Technology, content: str) -> None:
-        """Parse: feature_flags, weight_modifier, ai_weight."""
-        if ff_match := self.FEATURE_FLAGS_REGEX.search(content):
-            ff_block = self._extract_braced_block(content, ff_match.end())
-            if ff_block:
-                tech.feature_flags = self.WORD_REGEX.findall(ff_block)
-        if wm_match := self.WEIGHT_MODIFIER_REGEX.search(content):
-            wm_block = self._extract_braced_block(content, wm_match.end())
-            if wm_block:
-                tech.weight_modifier_script = self._clean_script_block(wm_block)
-        if ai_match := self.AI_WEIGHT_REGEX.search(content):
-            ai_block = self._extract_braced_block(content, ai_match.end())
-            if ai_block:
-                tech.ai_weight_script = self._clean_script_block(ai_block)
 
     def _parse_boolean_flags(self, tech: Technology, content: str) -> None:
         """Parse: is_dangerous, is_repeatable (start_tech handled in basic)."""
@@ -570,31 +510,6 @@ class ScanParseCore:
                 variant_set.add(target_tech_id)
             if suffix_label and polity_variant_map is not None:
                 polity_variant_map.setdefault(base_tech_id, set()).add(target_tech_id)
-
-    def _parse_simple_assignment_block(self, block: str) -> Dict[str, str]:
-        assignments: Dict[str, str] = {}
-        for raw_line in block.splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip()
-            if not key:
-                continue
-            assignments[key] = value
-        return assignments
-
-    def _clean_script_block(self, block: str) -> str:
-        parts = []
-        for raw_line in block.splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts.append(line)
-        return " ".join(parts)
 
     def _clean_description_text(self, description: str) -> str:
         description = (
