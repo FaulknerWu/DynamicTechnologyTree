@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import List
 
 
 @dataclass
@@ -11,7 +11,6 @@ class Technology:
     unlocked_tech_ids: List[str] = field(default_factory=list)
     is_dangerous_tech: bool = False
     is_repeatable_tech: bool = False
-    variants: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         dangerous_tech_list = {

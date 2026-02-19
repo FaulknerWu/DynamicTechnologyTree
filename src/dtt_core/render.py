@@ -20,6 +20,7 @@ class RenderContext:
     max_nodes: int  # T limit
     lang_code: str
     display_overrides: Optional[Dict[str, str]]
+    allowed_tech_ids: Optional[Set[str]]
     suppress_overflow_line: bool
     # Pre-computed localized strings
     already_shown_text: str = ""
@@ -81,10 +82,13 @@ class TreeRenderer:
         current_prereq: str = "",  # type: ignore
         lang_code: str = "simp_chinese",
         display_overrides: Optional[Dict[str, str]] = None,
+        allowed_tech_ids: Optional[Set[str]] = None,
         collapsed: bool = False,
         is_last: bool = False,
     ) -> str:
         if tech_id not in self.all_technologies:
+            return ""
+        if not self._is_tech_allowed(tech_id, allowed_tech_ids):
             return ""
         tech = self.all_technologies[tech_id]
         display_id = (
@@ -104,6 +108,7 @@ class TreeRenderer:
                 if (
                     prereq_id == current_prereq
                     or prereq_id not in self.all_technologies
+                    or not self._is_tech_allowed(prereq_id, allowed_tech_ids)
                 ):
                     continue
                 prereq_tech = self.all_technologies[prereq_id]
@@ -130,8 +135,17 @@ class TreeRenderer:
         collapse_suffix = f" {self.ELLIPSIS}" if collapsed else ""
         return f"{line_prefix}{formatted}{prereq_suffix}{collapse_suffix}"
 
-    def _compute_actual_max_depth(self, root_id: str) -> int:
+    def _is_tech_allowed(
+        self, tech_id: str, allowed_tech_ids: Optional[Set[str]]
+    ) -> bool:
+        return allowed_tech_ids is None or tech_id in allowed_tech_ids
+
+    def _compute_actual_max_depth(
+        self, root_id: str, allowed_tech_ids: Optional[Set[str]] = None
+    ) -> int:
         if root_id not in self.all_technologies:
+            return 0
+        if not self._is_tech_allowed(root_id, allowed_tech_ids):
             return 0
         max_depth = 0
         visited: Set[str] = set()
@@ -140,25 +154,38 @@ class TreeRenderer:
             nid, d = stack.pop()
             if nid in visited:
                 continue
+            if not self._is_tech_allowed(nid, allowed_tech_ids):
+                continue
             visited.add(nid)
             max_depth = max(max_depth, d)
             tech = self.all_technologies.get(nid)
             if not tech:
                 continue
-            for cid in tech.unlocked_tech_ids:
+            for cid in self._get_sorted_children(tech, allowed_tech_ids):
                 if cid not in visited:
                     stack.append((cid, d + 1))
         return max_depth
 
-    def _compute_max_degree_except_root(self, root_id: str) -> int:
+    def _compute_max_degree_except_root(
+        self, root_id: str, allowed_tech_ids: Optional[Set[str]] = None
+    ) -> int:
         m = 0
         for tid, tech in self.all_technologies.items():
             if tid == root_id:
                 continue
-            m = max(m, len(tech.unlocked_tech_ids))
+            if not self._is_tech_allowed(tid, allowed_tech_ids):
+                continue
+            m = max(m, len(self._get_sorted_children(tech, allowed_tech_ids)))
         return max(m, 1)
 
-    def _visit_count_for_limits(self, root_id: str, x: int, y: int, T: int) -> int:
+    def _visit_count_for_limits(
+        self,
+        root_id: str,
+        x: int,
+        y: int,
+        T: int,
+        allowed_tech_ids: Optional[Set[str]] = None,
+    ) -> int:
         if root_id not in self.all_technologies:
             return 0
         visited: Set[str] = set()
@@ -166,16 +193,12 @@ class TreeRenderer:
         def dfs(nid: str, depth: int, is_root: bool):
             if x > 0 and depth > x:
                 return
+            if not self._is_tech_allowed(nid, allowed_tech_ids):
+                return
             tech = self.all_technologies.get(nid)
             if not tech:
                 return
-            children = sorted(
-                tech.unlocked_tech_ids,
-                key=lambda cid: (
-                    self.all_technologies.get(cid, Technology(cid)).tier_level,
-                    cid,
-                ),
-            )
+            children = self._get_sorted_children(tech, allowed_tech_ids)
             if not is_root and y > 0 and len(children) > y:
                 children = children[:y]
             for cid in children:
@@ -188,19 +211,21 @@ class TreeRenderer:
         dfs(root_id, 0, True)
         return len(visited)
 
-    def _choose_best_xy_for_root(self, root_id: str):
+    def _choose_best_xy_for_root(
+        self, root_id: str, allowed_tech_ids: Optional[Set[str]] = None
+    ):
         if root_id not in self.all_technologies:
             return -1
         root = self.all_technologies[root_id]
         T = self.display_config.max_display_nodes
-        root_children_count = len(root.unlocked_tech_ids)
+        root_children_count = len(self._get_sorted_children(root, allowed_tech_ids))
         if T > 0 and root_children_count > T:
             return -1
         max_tree_depth = self.display_config.max_tree_depth
         X_max = (
             max_tree_depth
             if max_tree_depth > 0
-            else self._compute_actual_max_depth(root_id)
+            else self._compute_actual_max_depth(root_id, allowed_tech_ids)
         )
         if X_max <= 0:
             X_max = 1
@@ -208,7 +233,7 @@ class TreeRenderer:
         if Y_max_config > 0:
             Y_max = Y_max_config
         else:
-            Y_max = self._compute_max_degree_except_root(root_id)
+            Y_max = self._compute_max_degree_except_root(root_id, allowed_tech_ids)
         best_x = 0
         best_y = 0
         best_size = -1
@@ -219,14 +244,20 @@ class TreeRenderer:
             feasible_y = None
             feasible_size = -1
             if Y_max == 1:
-                size = self._visit_count_for_limits(root_id, x, 1, T)
+                size = self._visit_count_for_limits(root_id, x, 1, T, allowed_tech_ids)
                 if T == 0 or size <= T:
                     feasible_y = 1
                     feasible_size = size
             else:
                 while low <= high:
                     mid = (low + high) // 2
-                    size = self._visit_count_for_limits(root_id, x, mid, T)
+                    size = self._visit_count_for_limits(
+                        root_id,
+                        x,
+                        mid,
+                        T,
+                        allowed_tech_ids,
+                    )
                     if T == 0:
                         feasible_y = mid
                         feasible_size = size
@@ -261,6 +292,7 @@ class TreeRenderer:
         y: int,
         current_depth: int,
         visited_global: Set[str],
+        allowed_tech_ids: Optional[Set[str]] = None,
     ) -> int:
         if not start_nodes:
             return 0
@@ -270,6 +302,8 @@ class TreeRenderer:
         local_seen: Set[str] = set()
         while stack:
             nid, d = stack.pop()
+            if not self._is_tech_allowed(nid, allowed_tech_ids):
+                continue
             if nid in visited_global or nid in local_seen:
                 continue
             local_seen.add(nid)
@@ -278,13 +312,7 @@ class TreeRenderer:
             tech = self.all_technologies.get(nid)
             if not tech:
                 continue
-            children = sorted(
-                tech.unlocked_tech_ids,
-                key=lambda cid: (
-                    self.all_technologies.get(cid, Technology(cid)).tier_level,
-                    cid,
-                ),
-            )
+            children = self._get_sorted_children(tech, allowed_tech_ids)
             if d > 0 and y > 0:
                 if nid != root_id and len(children) > y:
                     children = children[:y]
@@ -300,6 +328,7 @@ class TreeRenderer:
         T: int,
         lang_code: str,
         display_overrides: Optional[Dict[str, str]] = None,
+        allowed_tech_ids: Optional[Set[str]] = None,
         suppress_overflow_line: bool = False,
     ) -> RenderContext:
         strings = self.localization_strings.get(
@@ -312,6 +341,7 @@ class TreeRenderer:
             max_nodes=T,
             lang_code=lang_code,
             display_overrides=display_overrides,
+            allowed_tech_ids=allowed_tech_ids,
             suppress_overflow_line=suppress_overflow_line,
             already_shown_text=strings.get("already_shown", "already shown"),
             folded_more_tpl=strings.get("folded_more", "({count} more)"),
@@ -320,9 +350,16 @@ class TreeRenderer:
             ),
         )
 
-    def _get_sorted_children(self, tech: Technology) -> List[str]:
+    def _get_sorted_children(
+        self, tech: Technology, allowed_tech_ids: Optional[Set[str]] = None
+    ) -> List[str]:
+        children = [
+            cid
+            for cid in tech.unlocked_tech_ids
+            if self._is_tech_allowed(cid, allowed_tech_ids)
+        ]
         return sorted(
-            tech.unlocked_tech_ids,
+            children,
             key=lambda cid: (
                 self.all_technologies.get(cid, Technology(cid)).tier_level,
                 cid,
@@ -354,6 +391,7 @@ class TreeRenderer:
                 ctx.max_children,
                 parent_depth,
                 state.visited_unique,
+                ctx.allowed_tech_ids,
             )
             state.overflow = True
             if not ctx.suppress_overflow_line:
@@ -385,6 +423,7 @@ class TreeRenderer:
             parent_id,
             ctx.lang_code,
             display_overrides=ctx.display_overrides,
+            allowed_tech_ids=ctx.allowed_tech_ids,
             is_last=not has_more_siblings,
         )
         if not line:
@@ -402,7 +441,7 @@ class TreeRenderer:
                     ctx,
                     state,
                     child_id,
-                    self._get_sorted_children(child_tech),
+                    self._get_sorted_children(child_tech, ctx.allowed_tech_ids),
                     parent_depth + 1,
                     False,
                     prefix_bars + [has_more_siblings],
@@ -469,16 +508,24 @@ class TreeRenderer:
         T: int,
         lang_code: str,
         display_overrides: Optional[Dict[str, str]] = None,
+        allowed_tech_ids: Optional[Set[str]] = None,
         suppress_overflow_line: bool = False,
     ) -> Tuple[List[str], bool]:
         if root_id not in self.all_technologies:
             return [], False
         ctx = self._create_render_context(
-            root_id, x, y, T, lang_code, display_overrides, suppress_overflow_line
+            root_id,
+            x,
+            y,
+            T,
+            lang_code,
+            display_overrides,
+            allowed_tech_ids,
+            suppress_overflow_line,
         )
         state = RenderState()
         root = self.all_technologies[root_id]
-        root_children = self._get_sorted_children(root)
+        root_children = self._get_sorted_children(root, allowed_tech_ids)
         self._render_children(
             ctx,
             state,
@@ -490,9 +537,15 @@ class TreeRenderer:
         )
         return state.lines, state.overflow
 
-    def _check_root_overflow(self, tech_id: str, T: int, lang_code: str) -> bool:
+    def _check_root_overflow(
+        self,
+        tech_id: str,
+        T: int,
+        lang_code: str,
+        allowed_tech_ids: Optional[Set[str]] = None,
+    ) -> bool:
         root = self.all_technologies[tech_id]
-        root_children_count = len(root.unlocked_tech_ids)
+        root_children_count = len(self._get_sorted_children(root, allowed_tech_ids))
         if T > 0 and root_children_count > T:
             if self.overlong_tech_ids is not None:
                 self.overlong_tech_ids.add(tech_id)
@@ -507,12 +560,14 @@ class TreeRenderer:
         content = f"{header}\n{self.TREE_BRANCH}§R{msg}§!"
         return content.replace("\n", "\\n")
 
-    def _get_raw_render_params(self, tech_id: str) -> Tuple[int, int]:
+    def _get_raw_render_params(
+        self, tech_id: str, allowed_tech_ids: Optional[Set[str]] = None
+    ) -> Tuple[int, int]:
         max_tree_depth = self.display_config.max_tree_depth
         raw_x = (
             max_tree_depth
             if max_tree_depth > 0
-            else self._compute_actual_max_depth(tech_id)
+            else self._compute_actual_max_depth(tech_id, allowed_tech_ids)
         )
         if raw_x <= 0:
             raw_x = 1
@@ -528,6 +583,7 @@ class TreeRenderer:
         T: int,
         lang_code: str,
         display_overrides: Optional[Dict[str, str]] = None,
+        allowed_tech_ids: Optional[Set[str]] = None,
     ) -> str:
         lines_stage_final, _ = self._render_tree_with_limits(
             tech_id,
@@ -536,6 +592,7 @@ class TreeRenderer:
             T,
             lang_code,
             display_overrides=display_overrides,
+            allowed_tech_ids=allowed_tech_ids,
             suppress_overflow_line=False,
         )
         if not lines_stage_final:
@@ -551,13 +608,21 @@ class TreeRenderer:
         T: int,
         lang_code: str,
         display_overrides: Optional[Dict[str, str]] = None,
+        allowed_tech_ids: Optional[Set[str]] = None,
     ) -> str:
-        chosen = self._choose_best_xy_for_root(tech_id)
+        chosen = self._choose_best_xy_for_root(tech_id, allowed_tech_ids)
         if chosen == -1:
             return self._format_root_overflow_message(header, lang_code)
         best_x, best_y, _ = chosen
         return self._finalize_tree_content(
-            header, tech_id, best_x, best_y, T, lang_code, display_overrides
+            header,
+            tech_id,
+            best_x,
+            best_y,
+            T,
+            lang_code,
+            display_overrides,
+            allowed_tech_ids,
         )
 
     def generate_tech_tree_content(
@@ -565,15 +630,16 @@ class TreeRenderer:
         tech_id: str,
         lang_code: str = "simp_chinese",
         display_overrides: Optional[Dict[str, str]] = None,
+        allowed_tech_ids: Optional[Set[str]] = None,
     ) -> str:
         if tech_id not in self.all_technologies:
             return ""
         header = "\\n\\n§H$technology_tree_title$§!"
         T = self.display_config.max_display_nodes
-        if self._check_root_overflow(tech_id, T, lang_code):
+        if self._check_root_overflow(tech_id, T, lang_code, allowed_tech_ids):
             return self._format_root_overflow_message(header, lang_code)
 
-        raw_x, raw_y = self._get_raw_render_params(tech_id)
+        raw_x, raw_y = self._get_raw_render_params(tech_id, allowed_tech_ids)
         _, overflow_stage_probe = self._render_tree_with_limits(
             tech_id,
             raw_x,
@@ -581,13 +647,26 @@ class TreeRenderer:
             T,
             lang_code,
             display_overrides=display_overrides,
+            allowed_tech_ids=allowed_tech_ids,
             suppress_overflow_line=True,
         )
         if not overflow_stage_probe or T == 0:
             return self._finalize_tree_content(
-                header, tech_id, raw_x, raw_y, T, lang_code, display_overrides
+                header,
+                tech_id,
+                raw_x,
+                raw_y,
+                T,
+                lang_code,
+                display_overrides,
+                allowed_tech_ids,
             )
 
         return self._render_with_optimized_params(
-            header, tech_id, T, lang_code, display_overrides
+            header,
+            tech_id,
+            T,
+            lang_code,
+            display_overrides,
+            allowed_tech_ids,
         )

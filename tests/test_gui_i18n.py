@@ -1,3 +1,5 @@
+# pyright: reportMissingImports=false
+
 from __future__ import annotations
 
 import configparser
@@ -10,8 +12,9 @@ import pytest
 # Must be set before creating the QApplication.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E402
 
+from gui.generation_worker import GenerationOutcome, GenerationOutcomeCode
 from gui.i18n import default_language_from_system, map_locale_to_language_key, t
 from gui.main_window import MainWindow
 
@@ -20,7 +23,7 @@ from gui.main_window import MainWindow
 def qt_app() -> Any:
     """Create a single QApplication for offscreen GUI tests."""
 
-    app = QApplication.instance()
+    app: Any = QApplication.instance()
     if app is None:
         app = QApplication([])
 
@@ -102,7 +105,7 @@ def test_runtime_retranslation_updates_window_tabs_and_placeholders(
         title_en = window.windowTitle()
         generate_en = window.generate_button.text()
         tab_en = tabs.tabText(paths_index)
-        placeholder_en = window.config_editor.priority_mods_input.placeholderText()
+        max_children_label_en = window.config_editor.max_children_label.text()
 
         # Switch english -> simp_chinese and verify visible text changes.
         combo.setCurrentText("simp_chinese")
@@ -120,13 +123,11 @@ def test_runtime_retranslation_updates_window_tabs_and_placeholders(
         assert tabs.tabText(paths_index) == t("ui_tab_paths", "simp_chinese")
         assert tab_en == t("ui_tab_paths", "english")
 
-        assert (
-            window.config_editor.priority_mods_input.placeholderText() != placeholder_en
+        assert window.config_editor.max_children_label.text() != max_children_label_en
+        assert window.config_editor.max_children_label.text() == t(
+            "ui_label_max_children", "simp_chinese"
         )
-        assert window.config_editor.priority_mods_input.placeholderText() == t(
-            "ui_placeholder_priority_mods", "simp_chinese"
-        )
-        assert placeholder_en == t("ui_placeholder_priority_mods", "english")
+        assert max_children_label_en == t("ui_label_max_children", "english")
     finally:
         window.close()
         window.deleteLater()
@@ -153,13 +154,22 @@ def test_save_config_validation_and_persistence(
         # Required paths filled -> config.ini written with selected language.
         base_game_dir = tmp_path / "game"
         workshop_dir = tmp_path / "workshop"
+        launcher_db = tmp_path / "launcher-v2.sqlite"
         base_game_dir.mkdir()
         workshop_dir.mkdir()
+        launcher_db.write_text("", encoding="utf-8")
 
         window.config_editor.base_game_path_input.setText(str(base_game_dir))
         window.config_editor.mod_folder_path_input.setText(str(workshop_dir))
+        window.config_editor.launcher_db_path_input.setText(str(launcher_db))
         window.config_editor.language_combo.setCurrentText("simp_chinese")
         qt_app.processEvents()
+        window.config.read_string(
+            """
+[localization]
+priority_mods = 12345
+""".strip()
+        )
 
         window.on_save_clicked()
         assert cfg_path.exists(), "expected config.ini to be written"
@@ -167,10 +177,12 @@ def test_save_config_validation_and_persistence(
         parser = configparser.ConfigParser()
         parser.read(cfg_path, encoding="utf-8")
         assert parser.get("localization", "language") == "simp_chinese"
+        assert not parser.has_option("localization", "priority_mods")
 
         text = cfg_path.read_text(encoding="utf-8")
         assert "[localization]" in text
         assert "language = simp_chinese" in text
+        assert "priority_mods" not in text
     finally:
         window.close()
         window.deleteLater()
@@ -218,15 +230,23 @@ def test_language_locked_during_generation(
     import gui.main_window as main_window_module
 
     monkeypatch.setattr(main_window_module, "GenerationWorker", DummyWorker)
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *_args, **_kwargs: (str(tmp_path / "current.sav"), ""),
+    )
 
     window = _make_window(tmp_path, qt_app)
     try:
         base_game_dir = tmp_path / "game"
         workshop_dir = tmp_path / "workshop"
+        launcher_db = tmp_path / "launcher-v2.sqlite"
         base_game_dir.mkdir()
         workshop_dir.mkdir()
+        launcher_db.write_text("", encoding="utf-8")
         window.config_editor.base_game_path_input.setText(str(base_game_dir))
         window.config_editor.mod_folder_path_input.setText(str(workshop_dir))
+        window.config_editor.launcher_db_path_input.setText(str(launcher_db))
         qt_app.processEvents()
 
         window.on_generate_clicked()
@@ -234,7 +254,9 @@ def test_language_locked_during_generation(
         assert not window.config_editor.language_combo.isEnabled()
         assert not window.save_button.isEnabled()
 
-        window.on_generation_finished(True, "")
+        window.on_generation_finished(
+            GenerationOutcome(code=GenerationOutcomeCode.SUCCESS)
+        )
 
         assert window.config_editor.language_combo.isEnabled()
         assert window.save_button.isEnabled()

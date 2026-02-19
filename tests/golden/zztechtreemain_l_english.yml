@@ -2,8 +2,6 @@
  technology_tree_title:0 "Technology Tree"
  tech_tree_max_level:0 "Maximum Level Reached"
  tech_child_a_techtree:0 "\n\n§H$technology_tree_title$§!\n|-(3)['technology:tech_grandchild', £society£§W$tech_grandchild$§!]"
- tech_child_a_gestalt_techtree:0 "\n\n§H$technology_tree_title$§!\n|-(3)['technology:tech_grandchild', £society£§W$tech_grandchild$§!]"
  tech_child_b_techtree:0 "\n\n§H$technology_tree_title$§!\n§Y$tech_tree_max_level$§!"
  tech_grandchild_techtree:0 "\n\n§H$technology_tree_title$§!\n§Y$tech_tree_max_level$§!"
  tech_root_techtree:0 "\n\n§H$technology_tree_title$§!\n|-(2)['technology:tech_child_a', £physics£§W$tech_child_a$§!]\n|   |-(3)['technology:tech_grandchild', £society£§W$tech_grandchild$§!]\n|-(2)['technology:tech_child_b', £engineering£§W$tech_child_b$§!]"
- tech_root_corporate_techtree:0 "\n\n§H$technology_tree_title$§!\n|-(2)['technology:tech_child_a', £physics£§W$tech_child_a$§!]\n|   |-(3)['technology:tech_grandchild', £society£§W$tech_grandchild$§!]\n|-(2)['technology:tech_child_b', £engineering£§W$tech_child_b$§!]"

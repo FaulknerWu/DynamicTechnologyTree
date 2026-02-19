@@ -2,6 +2,13 @@ from collections import Counter
 from typing import Callable, Dict, Set
 
 from config import GeneratorConfig
+from dtt_core.events import (
+    EventKind,
+    EventSink,
+    GenerationEvent,
+    NullEventSink,
+    StageId,
+)
 from models import Technology
 
 
@@ -15,6 +22,7 @@ class StatsReporter:
         config: GeneratorConfig,
         localize: Callable[..., str],
         print_overlong_tree_roots: Callable[[], None],
+        event_sink: EventSink | None = None,
     ) -> None:
         self.all_technologies = all_technologies
         self.base_game_tech_ids = base_game_tech_ids
@@ -23,6 +31,21 @@ class StatsReporter:
         self.config = config
         self._l = localize
         self._print_overlong_tree_roots = print_overlong_tree_roots
+        self._event_sink: EventSink = (
+            event_sink if event_sink is not None else NullEventSink()
+        )
+
+    def set_event_sink(self, event_sink: EventSink | None) -> None:
+        self._event_sink = event_sink if event_sink is not None else NullEventSink()
+
+    def _emit(self, kind: EventKind, message: str) -> None:
+        self._event_sink.emit(
+            GenerationEvent(
+                stage_id=StageId.RENDER,
+                kind=kind,
+                message=message,
+            )
+        )
 
     def calculate_generation_statistics(self) -> Dict[str, object]:
         stats = {
@@ -48,30 +71,38 @@ class StatsReporter:
 
     def display_generation_statistics(self) -> None:
         stats = self.calculate_generation_statistics()
-        print(f"\n{self._l('stats_header')}")
-        print(
+        self._emit(EventKind.LOG, f"\n{self._l('stats_header')}")
+        self._emit(
+            EventKind.LOG,
             self._l(
                 "stats_total",
                 total=stats["total"],
                 base=stats["base"],
                 mod=stats["mod"],
-            )
+            ),
         )
         lang_code = self.config.localization.target_language_code
         localized_count = sum(
             1 for descs in self.tech_descriptions.values() if lang_code in descs
         )
-        print(self._l("stats_localization", lang=lang_code, count=localized_count))
+        self._emit(
+            EventKind.LOG,
+            self._l("stats_localization", lang=lang_code, count=localized_count),
+        )
         if self.overlong_tech_ids:
-            print(
+            self._emit(
+                EventKind.WARNING,
                 self._l(
                     "stats_overlong",
                     threshold=self.config.display.max_display_nodes,
                     count=len(self.overlong_tech_ids),
-                )
+                ),
             )
             self._print_overlong_tree_roots()
         else:
             max_display_nodes = self.config.display.max_display_nodes
             if max_display_nodes > 0:
-                print(self._l("overbreadth_zero", threshold=max_display_nodes))
+                self._emit(
+                    EventKind.LOG,
+                    self._l("overbreadth_zero", threshold=max_display_nodes),
+                )

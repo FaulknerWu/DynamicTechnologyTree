@@ -106,14 +106,14 @@ class ConfigEditor(QWidget):
         for button in (
             self.base_game_browse_button,
             self.mod_folder_browse_button,
-            self.dlc_load_browse_button,
+            self.launcher_db_browse_button,
             self.local_mod_browse_button,
         ):
             button.setText(t("ui_btn_browse", lang))
         for button in (
             self.base_game_detect_button,
             self.mod_folder_detect_button,
-            self.dlc_load_detect_button,
+            self.launcher_db_detect_button,
             self.local_mod_detect_button,
         ):
             button.setText(t("ui_btn_autodetect", lang))
@@ -121,20 +121,14 @@ class ConfigEditor(QWidget):
         # Form labels
         self.base_game_path_label.setText(t("ui_label_base_game_path", lang))
         self.mod_folder_path_label.setText(t("ui_label_workshop_path", lang))
-        self.dlc_load_path_label.setText(t("ui_label_dlc_load_path_optional", lang))
+        self.launcher_db_path_label.setText(t("ui_label_dlc_load_path_optional", lang))
         self.local_mod_path_label.setText(t("ui_label_local_mod_path_optional", lang))
 
         self.language_label.setText(t("ui_label_language", lang))
-        self.priority_mods_label.setText(t("ui_label_priority_mods", lang))
 
         self.max_children_label.setText(t("ui_label_max_children", lang))
         self.max_depth_label.setText(t("ui_label_max_depth", lang))
         self.max_nodes_label.setText(t("ui_label_max_nodes", lang))
-
-        # Placeholders
-        self.priority_mods_input.setPlaceholderText(
-            t("ui_placeholder_priority_mods", lang)
-        )
 
         # Status tooltips
         self._update_path_status(
@@ -144,7 +138,9 @@ class ConfigEditor(QWidget):
             self.mod_folder_status_label, self.mod_folder_path_input.text(), lang
         )
         self._update_path_status(
-            self.dlc_load_status_label, self.dlc_load_path_input.text(), lang
+            self.launcher_db_status_label,
+            self.launcher_db_path_input.text(),
+            lang,
         )
         self._update_path_status(
             self.local_mod_status_label,
@@ -202,19 +198,19 @@ class ConfigEditor(QWidget):
         form.addRow(self.mod_folder_path_label, mod_row)
 
         (
-            dlc_row,
-            self.dlc_load_path_input,
-            self.dlc_load_browse_button,
-            self.dlc_load_detect_button,
-            self.dlc_load_status_label,
+            launcher_db_row,
+            self.launcher_db_path_input,
+            self.launcher_db_browse_button,
+            self.launcher_db_detect_button,
+            self.launcher_db_status_label,
         ) = self._create_path_row(
             "ui_dialog_title_choose_dlc_load",
             is_file=True,
-            file_filter_key="ui_file_filter_json",
-            detect_callback=self._detect_dlc_load_path,
+            file_filter_key="ui_file_filter_sqlite",
+            detect_callback=self._detect_launcher_db_path,
         )
-        self.dlc_load_path_label = QLabel(tab)
-        form.addRow(self.dlc_load_path_label, dlc_row)
+        self.launcher_db_path_label = QLabel(tab)
+        form.addRow(self.launcher_db_path_label, launcher_db_row)
 
         (
             local_mod_row,
@@ -241,10 +237,6 @@ class ConfigEditor(QWidget):
         self.language_combo.addItems(_language_options())
         self.language_label = QLabel(tab)
         form.addRow(self.language_label, self.language_combo)
-
-        self.priority_mods_input = QLineEdit(tab)
-        self.priority_mods_label = QLabel(tab)
-        form.addRow(self.priority_mods_label, self.priority_mods_input)
 
         self.tabs.addTab(tab, "")
 
@@ -357,8 +349,8 @@ class ConfigEditor(QWidget):
         self.mod_folder_path_input.setText(
             config.get("paths", "mod_folder_path", fallback="").strip()
         )
-        self.dlc_load_path_input.setText(
-            config.get("paths", "dlc_load_path", fallback="").strip()
+        self.launcher_db_path_input.setText(
+            config.get("paths", "launcher_db_path", fallback="").strip()
         )
         self.local_mod_folder_path_input.setText(
             config.get("paths", "local_mod_folder_path", fallback="").strip()
@@ -377,14 +369,6 @@ class ConfigEditor(QWidget):
         with QSignalBlocker(self.language_combo):
             self.language_combo.setCurrentIndex(language_index)
         self.retranslate_ui()
-
-        self.priority_mods_input.setText(
-            config.get(
-                "localization",
-                "priority_mods",
-                fallback=",".join(default_loc.priority_localization_mod_ids),
-            ).strip()
-        )
 
         self.max_children_spin.setValue(
             self._get_int(
@@ -417,7 +401,9 @@ class ConfigEditor(QWidget):
         config.set(
             "paths", "mod_folder_path", self.mod_folder_path_input.text().strip()
         )
-        config.set("paths", "dlc_load_path", self.dlc_load_path_input.text().strip())
+        config.set(
+            "paths", "launcher_db_path", self.launcher_db_path_input.text().strip()
+        )
         config.set(
             "paths",
             "local_mod_folder_path",
@@ -426,9 +412,8 @@ class ConfigEditor(QWidget):
 
         self._ensure_section(config, "localization")
         config.set("localization", "language", self.language_combo.currentText())
-        config.set(
-            "localization", "priority_mods", self.priority_mods_input.text().strip()
-        )
+        if config.has_option("localization", "priority_mods"):
+            config.remove_option("localization", "priority_mods")
 
         self._ensure_section(config, "display")
         config.set(
@@ -444,6 +429,8 @@ class ConfigEditor(QWidget):
             missing_fields.append(t("ui_field_base_game_path", lang))
         if not self.mod_folder_path_input.text().strip():
             missing_fields.append(t("ui_field_workshop_path", lang))
+        if not self.launcher_db_path_input.text().strip():
+            missing_fields.append(t("ui_field_launcher_db_path", lang))
 
         if missing_fields:
             return False, t(
@@ -460,7 +447,7 @@ class ConfigEditor(QWidget):
     def apply_detected_paths(self, detected: DetectedPaths) -> None:
         self._set_if_empty(self.base_game_path_input, detected.game_path)
         self._set_if_empty(self.mod_folder_path_input, detected.workshop_path)
-        self._set_if_empty(self.dlc_load_path_input, detected.dlc_load_path)
+        self._set_if_empty(self.launcher_db_path_input, detected.launcher_db_path)
         self._set_if_empty(self.local_mod_folder_path_input, detected.local_mod_path)
 
     @staticmethod
@@ -486,8 +473,8 @@ class ConfigEditor(QWidget):
         return PathDetector().detect_workshop_path()
 
     @staticmethod
-    def _detect_dlc_load_path() -> str | None:
-        return PathDetector().detect_dlc_load_path()
+    def _detect_launcher_db_path() -> str | None:
+        return PathDetector().detect_launcher_db_path()
 
     @staticmethod
     def _detect_local_mod_path() -> str | None:

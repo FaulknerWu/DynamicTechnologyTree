@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
+
+from dtt_core.file_decode import format_decode_warning, read_text_with_diagnostics
 
 STEAM_APP_ID = "281990"
 GAME_DIR_NAME = "Stellaris"
@@ -16,7 +19,7 @@ class DetectedPaths:
     game_path: str | None
     workshop_path: str | None
     user_data_path: str | None
-    dlc_load_path: str | None
+    launcher_db_path: str | None
     local_mod_path: str | None
 
 
@@ -27,14 +30,14 @@ class PathDetector:
         game_path = self._detect_game_path_from_libraries(library_paths)
         workshop_path = self._detect_workshop_path_from_libraries(library_paths)
         user_data_path = self.detect_user_data_path()
-        dlc_load_path = self._detect_dlc_load_path(user_data_path)
+        launcher_db_path = self._detect_launcher_db_path(user_data_path)
         local_mod_path = self._detect_local_mod_path(user_data_path)
         return DetectedPaths(
             steam_path=steam_path,
             game_path=game_path,
             workshop_path=workshop_path,
             user_data_path=user_data_path,
-            dlc_load_path=dlc_load_path,
+            launcher_db_path=launcher_db_path,
             local_mod_path=local_mod_path,
         )
 
@@ -55,8 +58,8 @@ class PathDetector:
         candidates = self._user_data_candidates()
         return self._first_existing_path(candidates)
 
-    def detect_dlc_load_path(self) -> str | None:
-        return self._detect_dlc_load_path(self.detect_user_data_path())
+    def detect_launcher_db_path(self) -> str | None:
+        return self._detect_launcher_db_path(self.detect_user_data_path())
 
     def detect_local_mod_path(self) -> str | None:
         return self._detect_local_mod_path(self.detect_user_data_path())
@@ -65,10 +68,10 @@ class PathDetector:
         home = Path.home()
         return [home / "Documents" / USER_DATA_SUBPATH]
 
-    def _detect_dlc_load_path(self, user_data_path: str | None) -> str | None:
+    def _detect_launcher_db_path(self, user_data_path: str | None) -> str | None:
         if not user_data_path:
             return None
-        candidate = os.path.join(user_data_path, "dlc_load.json")
+        candidate = os.path.join(user_data_path, "launcher-v2.sqlite")
         return candidate if os.path.exists(candidate) else None
 
     def _detect_local_mod_path(self, user_data_path: str | None) -> str | None:
@@ -117,9 +120,17 @@ class PathDetector:
         if not os.path.exists(vdf_path):
             return []
         try:
-            text = Path(vdf_path).read_text(encoding="utf-8", errors="ignore")
+            decoded = read_text_with_diagnostics(Path(vdf_path))
         except OSError:
             return []
+        if decoded.diagnostics.has_warning:
+            warnings.warn(
+                f"Steam library VDF decode issue at {vdf_path}: "
+                f"{format_decode_warning(decoded.diagnostics)}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        text = decoded.text
         matches = re.findall(r'"path"\s*"([^"]+)"', text, flags=re.IGNORECASE)
         paths = []
         for raw in matches:

@@ -4,16 +4,18 @@ import configparser
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QCloseEvent, QFontDatabase
 from PyQt6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
-    QMessageBox,
     QStatusBar,
     QTextEdit,
     QVBoxLayout,
@@ -21,7 +23,11 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.config_editor import ConfigEditor
-from gui.generation_worker import GenerationWorker
+from gui.generation_worker import (
+    GenerationOutcome,
+    GenerationOutcomeCode,
+    GenerationWorker,
+)
 from gui.i18n import t
 from gui.title_bar import CustomTitleBar
 
@@ -45,6 +51,8 @@ class MainWindow(QMainWindow):
         )
         self.config = configparser.ConfigParser()
         self.worker: Optional[GenerationWorker] = None
+        self._selected_save_path = ""
+        self._pending_empire_options: list[dict[str, Any]] = []
 
         self._build_ui()
         self.load_config()
@@ -190,7 +198,7 @@ class MainWindow(QMainWindow):
                 for field in (
                     self.config_editor.base_game_path_input,
                     self.config_editor.mod_folder_path_input,
-                    self.config_editor.dlc_load_path_input,
+                    self.config_editor.launcher_db_path_input,
                     self.config_editor.local_mod_folder_path_input,
                 )
                 if field.text().strip()
@@ -240,6 +248,66 @@ class MainWindow(QMainWindow):
             return
         self.save_config()
 
+    def _choose_save_file(self) -> str:
+        save_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            self._t("ui_dialog_title_choose_save_file"),
+            "",
+            self._t("ui_file_filter_save"),
+        )
+        return save_path.strip()
+
+    def _set_generation_controls(self, generating: bool) -> None:
+        self.generate_button.setEnabled(not generating)
+        self.save_button.setEnabled(not generating)
+        self.config_editor.language_combo.setEnabled(not generating)
+        self.generate_button.setText(
+            self._t("ui_btn_generating") if generating else self._t("ui_btn_generate")
+        )
+
+    def _start_generation_worker(self, save_path: str, country_id: int | None) -> None:
+        self._selected_save_path = save_path
+        self._pending_empire_options = []
+        self._set_generation_controls(True)
+        self.log_output.clear()
+        self.progress_bar.setValue(0)
+
+        self.worker = GenerationWorker(str(self.config_path))
+        self.worker.save_path = save_path
+        self.worker.country_id = country_id
+        self.worker.log_message.connect(self.on_log_message)
+        self.worker.progress.connect(self.progress_bar.setValue)
+        self.worker.finished.connect(self.on_generation_finished)
+        self.worker.start()
+
+    def _choose_ambiguous_empire(self) -> int | None:
+        labels: list[str] = []
+        label_to_country: dict[str, int] = {}
+        for option in self._pending_empire_options:
+            country_id = option.get("country_id")
+            label = str(option.get("label", "")).strip()
+            if not isinstance(country_id, int):
+                continue
+            if not label:
+                label = str(country_id)
+            labels.append(label)
+            label_to_country[label] = country_id
+
+        if not labels:
+            return None
+
+        selected_label, accepted = QInputDialog.getItem(
+            self,
+            self._t("ui_dialog_title_choose_empire"),
+            self._t("ui_dialog_body_choose_empire"),
+            labels,
+            0,
+            False,
+        )
+        if not accepted:
+            return None
+        return label_to_country.get(selected_label)
+
     def on_generate_clicked(self) -> None:
         valid, error_message = self.config_editor.validate()
         if not valid:
@@ -250,45 +318,90 @@ class MainWindow(QMainWindow):
 
         if not self.save_config():
             return
-        self.generate_button.setEnabled(False)
-        self.generate_button.setText(self._t("ui_btn_generating"))
-        self.save_button.setEnabled(False)
-        self.config_editor.language_combo.setEnabled(False)
-        self.log_output.clear()
-        self.progress_bar.setValue(0)
 
-        self.worker = GenerationWorker(str(self.config_path))
-        self.worker.log_message.connect(self.on_log_message)
-        self.worker.progress.connect(self.progress_bar.setValue)
-        self.worker.finished.connect(self.on_generation_finished)
-        self.worker.start()
+        save_path = self._choose_save_file()
+        if not save_path:
+            return
+
+        self._start_generation_worker(save_path, country_id=None)
 
     def on_log_message(self, message: str) -> None:
         self.log_output.append(message)
 
-    def on_generation_finished(self, success: bool, message: str) -> None:
-        self.generate_button.setEnabled(True)
-        self.generate_button.setText(self._t("ui_btn_generate"))
-        self.save_button.setEnabled(True)
-        self.config_editor.language_combo.setEnabled(True)
-        self.progress_bar.setValue(100 if success else 0)
+    def on_generation_finished(self, outcome: object, legacy_message: str = "") -> None:
+        resolved_outcome = self._coerce_generation_outcome(outcome, legacy_message)
+
+        self._set_generation_controls(False)
+        self.progress_bar.setValue(100 if resolved_outcome.success else 0)
         if self.worker:
             self.worker.wait()
             self.worker.deleteLater()
             self.worker = None
 
-        if success:
+        if resolved_outcome.code == GenerationOutcomeCode.AMBIGUOUS_COUNTRY_SELECTION:
+            self._pending_empire_options = [
+                option
+                for option in resolved_outcome.empire_options
+                if isinstance(option, dict)
+            ]
+            selected_country_id = self._choose_ambiguous_empire()
+            self._pending_empire_options = []
+            if selected_country_id is None:
+                return
+            if not self._selected_save_path:
+                return
+            self._start_generation_worker(
+                self._selected_save_path,
+                country_id=selected_country_id,
+            )
+            return
+
+        if resolved_outcome.success:
             QMessageBox.information(
                 self,
                 self._t("ui_msgbox_title_done"),
                 self._t("ui_msgbox_body_generation_done"),
             )
         else:
+            if resolved_outcome.code == GenerationOutcomeCode.UNSUPPORTED_SAVE_FORMAT:
+                unsupported_error = resolved_outcome.message.strip()
+                QMessageBox.critical(
+                    self,
+                    self._t("ui_msgbox_title_unsupported_save_format"),
+                    self._t(
+                        "ui_msgbox_body_unsupported_save_format",
+                        error=unsupported_error,
+                    ),
+                )
+                return
+
+            error_message = resolved_outcome.message.strip()
+            if not error_message:
+                error_message = self._t("ui_worker_generation_incomplete")
             QMessageBox.critical(
                 self,
                 self._t("ui_msgbox_title_error"),
-                self._t("ui_msgbox_body_generation_failed", error=message),
+                self._t("ui_msgbox_body_generation_failed", error=error_message),
             )
+
+    def _coerce_generation_outcome(
+        self, outcome: object, legacy_message: str
+    ) -> GenerationOutcome:
+        if isinstance(outcome, GenerationOutcome):
+            return outcome
+
+        if isinstance(outcome, bool):
+            if outcome:
+                return GenerationOutcome(code=GenerationOutcomeCode.SUCCESS)
+            return GenerationOutcome(
+                code=GenerationOutcomeCode.ERROR,
+                message=str(legacy_message),
+            )
+
+        if isinstance(outcome, str):
+            return GenerationOutcome(code=GenerationOutcomeCode.ERROR, message=outcome)
+
+        return GenerationOutcome(code=GenerationOutcomeCode.ERROR, message=str(outcome))
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         if a0 is None:
