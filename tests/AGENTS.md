@@ -1,19 +1,22 @@
 # TESTS
 
-**Generated:** 2026-02-02T18:38:48Z
+**Generated:** 2026-02-13T11:26:17Z
 complexity: 3/5
 scope: tests/*
 inherits: ../AGENTS.md
 
 ## OVERVIEW
-Pytest-based smoke + golden regression coverage for the generator plus offscreen GUI/i18n coverage; tests run from a repo checkout without requiring an editable install.
+Pytest suite covering generator smoke + golden regression, core parsing/merge utilities, and offscreen GUI/i18n; tests run from a repo checkout without requiring an editable install.
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
 | Path injection | `tests/conftest.py:7` | Prepends `src/` to `sys.path` so tests can `import generator` |
 | Smoke test | `tests/test_smoke.py:25` | Writes temp `config.ini`, runs basic pipeline stages, asserts no techs |
-| Golden output regression | `tests/test_golden_output.py:35` | Runs end-to-end fixture pipeline; asserts output bytes match committed snapshots |
+| Golden output regression | `tests/test_golden_output.py:53` | Runs end-to-end fixture pipeline; asserts output bytes match committed snapshots |
+| Filtered trees/output contexts | `tests/test_filtered_tree.py` | Validates context filtering + output key generation |
+| Load order resolution | `tests/test_load_order_resolver.py` | Launcher DB vs `dlc_load.json` fallback + warnings |
+| Core parsing utilities | `tests/test_clausewitz_parser.py`, `tests/test_localisation_parser.py` | Parser behavior + merge ordering + diagnostics |
 | GUI i18n + runtime retranslation | `tests/test_gui_i18n.py:88` | Runs PyQt6 in offscreen mode; validates locale mapping/fallbacks, runtime UI retranslation, config language persistence, and language lock while generation is active |
 | Pytest config | `pyproject.toml:29` | `testpaths=["tests"]`, `python_files=test_*.py` |
 
