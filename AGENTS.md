@@ -15,7 +15,7 @@ Python 3.10+ app that generates Stellaris tech-tree localization output for the 
 ```
 ./
 |-- pyproject.toml                 # packaging + entrypoint + pytest config
-|-- README.md                      # usage (GUI-only), config.ini schema, build notes
+|-- README.md                      # usage (GUI-only), settings.json schema, build notes
 |-- packaging/
 |   `-- pyinstaller/
 |       `-- techtree_gui.spec      # canonical PyInstaller spec (Windows EXE build)
@@ -24,6 +24,8 @@ Python 3.10+ app that generates Stellaris tech-tree localization output for the 
 |   |-- config.py                  # config dataclasses + defaults
 |   |-- models.py                  # Technology model
 |   |-- localization.py            # LOCALIZATION_STRINGS + RESEARCH_AREA_ICONS
+|   |-- settings.py                # pydantic Settings model (GUI-edited JSON)
+|   |-- settings_store.py          # settings profile persistence + schema helpers
 |   |-- dtt_core/                  # core pipeline stages (scan/parse/render/output/etc.)
 |   `-- gui/                       # PyQt6 GUI (entrypoint, window, worker, path detection)
 `-- tests/                         # pytest (smoke + golden + core unit tests + GUI i18n)
@@ -34,8 +36,8 @@ Python 3.10+ app that generates Stellaris tech-tree localization output for the 
 |------|----------|-------|
 | Run GUI (installed) | `pyproject.toml:19` | `dtt-gui = "gui:main"` (calls `src/gui/__init__.py:69`) |
 | Run GUI (module) | `src/gui/__main__.py:12` | `python -m gui` executes `gui.main()` (also used by PyInstaller) |
-| Core generation pipeline | `src/generator.py:142` | `run_generation_process()` stages: ingest -> relate -> describe -> cycle/stats -> output |
-| Load config.ini | `src/dtt_core/config_loader.py:25` | `ConfigLoader.load_configuration()` returns `GeneratorConfig` |
+| Core generation pipeline | `src/dtt_core/generate_localization.py:26` | `GenerateLocalizationUseCase` stages: save-parse -> ingest -> relate -> describe -> cycle/stats -> output |
+| Settings snapshot -> config | `src/dtt_core/settings_snapshot.py:14` | `require_settings_snapshot()` + `generator_config_from_settings()` |
 | Resolve enabled mods/load order | `src/dtt_core/load_order_resolver.py:35` | Launcher DB (`launcher-v2.sqlite`) → fallback `dlc_load.json` |
 | Tech + localisation ingestion | `src/dtt_core/ingestion_pipeline.py:54` | Integrated scan/parse/merge pipeline (tech defs + localisation) |
 | Render tree text | `src/dtt_core/render.py:628` | `TreeRenderer.generate_tech_tree_content()` returns escaped `\\n` strings |
@@ -49,7 +51,7 @@ Python 3.10+ app that generates Stellaris tech-tree localization output for the 
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
 | `TechTreeGenerator` | class | `src/generator.py:17` | Orchestrates generation stages via composed core components |
-| `ConfigLoader` | class | `src/dtt_core/config_loader.py:15` | Loads `GeneratorConfig`; provides localized strings via `l()` |
+| `generator_config_from_settings` | func | `src/dtt_core/settings_snapshot.py:18` | Converts a settings snapshot into `GeneratorConfig` |
 | `LoadOrderResolver` | class | `src/dtt_core/load_order_resolver.py:35` | Computes enabled mods in order (launcher DB / `dlc_load.json`) |
 | `IntegratedIngestionPipeline` | class | `src/dtt_core/ingestion_pipeline.py:54` | Integrated scan/parse/merge pipeline for tech definitions and localisation |
 | `FileIndexer` | class | `src/dtt_core/file_indexer.py:25` | Deterministic file ordering with `replace_path` support (LIOS/last-wins) |
@@ -70,7 +72,8 @@ Python 3.10+ app that generates Stellaris tech-tree localization output for the 
 - Packaging: `package-dir={"": "src"}`; flat modules in `py-modules`, packages discovered via `find_packages` (`pyproject.toml`).
 - Primary entrypoint: `dtt-gui` runs `gui:main` (keep `python -m gui` for module execution / PyInstaller analysis).
 - Output is written under `./localisation/` relative to process CWD (GUI normalizes CWD in `src/gui/__init__.py`).
-- `localization.priority_mods` is deprecated: accepted for backwards-compat, ignored for merge order (`README.md`, `src/dtt_core/config_loader.py`).
+- Settings are stored/edited as JSON via `Settings` (`src/settings.py`) and persisted by `settings_store` (GUI profiles).
+- Generation requires selecting a `.sav` file; outcome semantics are `success`/`incomplete`/`cancelled`/`error` from the final DONE event details.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Reintroducing silent decode loss: all text reads should go through `dtt_core.file_decode` (don’t add `errors="ignore"` reads).

@@ -20,14 +20,12 @@ src/dtt_core/
 |-- localisation_parser.py   # localisation YML parsing + last-wins merge + diagnostics
 |-- file_decode.py           # tolerant decoding + diagnostics (avoid errors="ignore")
 |-- trigger_evaluator.py     # evaluate tech triggers for filtered trees
-|-- filtered_tree.py         # filtered-tree contexts + eligibility report
 |-- mod_descriptor_loader.py # parse .mod descriptors (encoding-tolerant)
 |-- relations.py             # build prereq/unlock relationships; overlong-root precompute
 |-- render.py                # tree formatting with depth/children/node caps and overflow hints
 |-- output.py                # writes localisation YML variants (replace/dirs) as utf-8-sig
 |-- cycle.py                 # circular dependency detection + reporting
 |-- stats.py                 # generation stats reporting
-`-- config_loader.py         # reads config.ini; localization string lookup
 ```
 
 ## WHERE TO LOOK
@@ -37,7 +35,6 @@ src/dtt_core/
 | Mod load order resolution | `src/dtt_core/load_order_resolver.py:35` | `LoadOrderResolver` resolves enabled mods from launcher DB / dlc_load.json |
 | Deterministic file indexing | `src/dtt_core/file_indexer.py:25` | `FileIndexer` builds LIOS-ordered file index with replace_path support |
 | Localisation parsing + merge | `src/dtt_core/localisation_parser.py:15` | Parses `.yml` localisation and merges via last-wins |
-| Load config.ini | `src/dtt_core/config_loader.py:25` | `ConfigLoader.load_configuration()` returns `GeneratorConfig` |
 | Build relationships | `src/dtt_core/relations.py:18` | Populates prereq/unlock edges on `Technology` objects |
 | Render a tree | `src/dtt_core/render.py:628` | `generate_tech_tree_content()` returns escaped `\\n` strings |
 | Emit output files | `src/dtt_core/output.py:352` | `generate_all_yml_files()` writes multiple candidate paths |

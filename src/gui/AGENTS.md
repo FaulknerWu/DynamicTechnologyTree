@@ -1,7 +1,7 @@
 # GUI (PyQt6)
 
 ## OVERVIEW
-PyQt6 GUI for editing `config.ini`, auto-detecting Stellaris paths, and running generation on a background thread while streaming logs/progress.
+PyQt6 GUI for editing JSON settings profiles, auto-detecting Stellaris paths, and running generation on a background thread while streaming logs/progress.
 
 complexity: 4/5
 scope: src/gui/*
@@ -12,7 +12,9 @@ inherits: ../../AGENTS.md
 src/gui/
 |-- __init__.py          # gui-script entrypoint: gui:main
 |-- main_window.py       # MainWindow: UI shell + generation wiring
-|-- config_editor.py     # ConfigEditor: edits config.ini sections
+|-- settings_panel.py    # SettingsPanel: schema-rendered controls + raw JSON tab
+|-- settings_renderer.py # SettingsRenderer: schema-to-widget form renderer
+|-- settings_json_editor.py # SettingsJsonEditor: raw JSON editor/validator
 |-- generation_worker.py # GenerationWorker(QThread): runs generator + emits signals
 |-- i18n.py              # translation + locale mapping + language defaults
 |-- path_detector.py     # PathDetector: Steam/game/workshop/user-data discovery
@@ -31,9 +33,9 @@ src/gui/
 | Path auto-detect | `src/gui/path_detector.py:26` | Heuristics for Steam + Stellaris install |
 
 ## CONVENTIONS
-- Do not block the UI thread: generation runs in `GenerationWorker(QThread)` (`src/gui/generation_worker.py:29`).
-- Logs are transported by redirecting `stdout`/`stderr` into `log_message` (`src/gui/generation_worker.py:53`).
-- Config persistence uses `configparser` and writes `config.ini` in-place (`src/gui/main_window.py:215`).
+- Do not block the UI thread: generation runs in `GenerationWorker(QThread)` (`src/gui/generation_worker.py:47`).
+- Logs are transported via event/log signals on the worker thread (`src/gui/generation_worker.py:48`).
+- Settings persistence uses JSON settings profiles via `settings_store` (`src/gui/main_window.py:35`).
 
 ## ANTI-PATTERNS
 - Losing debugging context: GUI error handling currently emits only `str(exc)` (`src/gui/generation_worker.py:73`).
