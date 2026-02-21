@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Save-derived data contracts for trigger evaluation.
 
 Trigger evaluation targets current-save empire facts only (authority, ethics,
@@ -9,8 +7,10 @@ evaluators should propagate Unknown, and later eligibility layers may exclude
 Unknown results.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 
 def _normalize_key(value: str) -> str:

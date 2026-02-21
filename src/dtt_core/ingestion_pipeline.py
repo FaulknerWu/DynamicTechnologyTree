@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-import re
-from typing import Dict, List, Optional, Set, Tuple
+from threading import Event
+from typing import TypedDict
 
-from config import GeneratorConfig
+from config import DecodeFailurePolicy, GeneratorConfig
 from dtt_core.clausewitz_parser import parse
 from dtt_core.events import (
     EventKind,
@@ -23,7 +24,6 @@ from dtt_core.load_order_resolver import (
 )
 from dtt_core.localisation_parser import (
     merge_localisation_file_stream,
-    parse_localisation_file,
 )
 from dtt_core.mod_descriptor_loader import load_descriptor
 from dtt_core.source_manifest import FileRef, Source, SourceManifest
@@ -34,10 +34,15 @@ from dtt_core.tech_extractor import (
 from dtt_core.tech_merge import MergedTechDefinition, merge_all_fragments
 from models import Technology
 
-
-_MAX_EXAMPLES = 10
 _WORKSHOP_ID_RE = re.compile(r"ugc_(\d+)")
 _WHITESPACE_RE = re.compile(r"\s+")
+
+
+class _DecodeReadKwargs(TypedDict):
+    preferred_encodings: tuple[str, ...]
+    fallback_encodings: tuple[str, ...]
+    replacement_encoding: str
+    on_failure: DecodeFailurePolicy
 
 
 @dataclass
@@ -52,7 +57,8 @@ class IngestionReport:
     localization_files_with_diagnostics: int = 0
     localization_diagnostic_count: int = 0
     localization_override_count: int = 0
-    examples: List[Tuple[str, str]] = field(default_factory=list)
+    tech_examples: list[tuple[str, str]] = field(default_factory=list)
+    localisation_examples: list[tuple[str, str]] = field(default_factory=list)
 
 
 class IntegratedIngestionPipeline:
@@ -63,10 +69,10 @@ class IntegratedIngestionPipeline:
         *,
         config: GeneratorConfig,
         localize,
-        all_technologies: Dict[str, Technology],
-        base_game_tech_ids: Set[str],
-        tech_descriptions: Dict[str, Dict[str, str]],
-        merged_tech_definitions: Dict[str, MergedTechDefinition],
+        all_technologies: dict[str, Technology],
+        base_game_tech_ids: set[str],
+        tech_descriptions: dict[str, dict[str, str]],
+        merged_tech_definitions: dict[str, MergedTechDefinition],
         event_sink: EventSink | None = None,
     ) -> None:
         self.config = config
@@ -78,14 +84,19 @@ class IntegratedIngestionPipeline:
         self._event_sink: EventSink = (
             event_sink if event_sink is not None else NullEventSink()
         )
-        self._swap_variant_ids: Set[str] = set()
+        self._cancel_event: Event | None = None
+        self._swap_variant_ids: set[str] = set()
 
         self._resolver = LoadOrderResolver()
-        self._indexer = FileIndexer()
+        self._indexer = FileIndexer(config=self.config.file_indexing)
         self._extractor = TechExtractor()
 
-        self._manifest: Optional[SourceManifest] = None
+        self._manifest: SourceManifest | None = None
         self._report = IngestionReport()
+        self._diagnostic_example_limit = max(
+            0,
+            self.config.ingestion.diagnostic_example_limit,
+        )
 
     @property
     def report(self) -> IngestionReport:
@@ -93,6 +104,24 @@ class IntegratedIngestionPipeline:
 
     def set_event_sink(self, event_sink: EventSink | None) -> None:
         self._event_sink = event_sink if event_sink is not None else NullEventSink()
+
+    def apply_config(self, config: GeneratorConfig) -> None:
+        """Apply a new settings snapshot.
+
+        The generator can reuse this pipeline across runs. When settings change we
+        must refresh any config-dependent helpers and cached manifests.
+        """
+
+        self.config = config
+        self._indexer = FileIndexer(config=self.config.file_indexing)
+        self._diagnostic_example_limit = max(
+            0,
+            self.config.ingestion.diagnostic_example_limit,
+        )
+        self._manifest = None
+
+    def set_cancel_event(self, cancel_event: Event | None) -> None:
+        self._cancel_event = cancel_event
 
     def _emit(self, stage_id: StageId, kind: EventKind, message: str) -> None:
         self._event_sink.emit(
@@ -110,12 +139,18 @@ class IntegratedIngestionPipeline:
         self.merged_tech_definitions.clear()
 
         self._report = IngestionReport()
+
+        # New generation run: ensure we don't reuse a manifest built with a
+        # previous settings snapshot (paths/load-order).
+        self._manifest = None
         manifest = self._build_manifest()
         tech_files = self._indexer.index_technology_files(manifest)
         self._report.tech_files_total = len(tech_files)
 
-        fragments: List[TechDefinitionFragment] = []
+        fragments: list[TechDefinitionFragment] = []
         for file_ref in tech_files:
+            if self._cancel_event is not None and self._cancel_event.is_set():
+                return
             self._consume_technology_file(file_ref, fragments)
 
         merged = merge_all_fragments(fragments)
@@ -135,6 +170,7 @@ class IntegratedIngestionPipeline:
         self.tech_descriptions.clear()
         self._swap_variant_ids.clear()
         self._collect_swap_variant_ids(self.merged_tech_definitions)
+        self._report.localisation_examples.clear()
 
         manifest = self._build_manifest()
         all_loc_files = self._indexer.index_localisation_files(manifest)
@@ -150,6 +186,8 @@ class IntegratedIngestionPipeline:
         merge_result = merge_localisation_file_stream(
             selected_loc_files,
             expected_language=target_lang,
+            cancel_event=self._cancel_event,
+            **self._decode_read_kwargs(),
         )
 
         diagnostics = merge_result.diagnostics
@@ -157,13 +195,16 @@ class IntegratedIngestionPipeline:
         if diagnostics:
             failed_paths = {diag.path for diag in diagnostics}
             self._report.localization_files_with_diagnostics = len(failed_paths)
-            for diag in diagnostics[:_MAX_EXAMPLES]:
-                self._report.examples.append((str(diag.path), diag.message))
+            seen_paths: set[Path] = set()
+            for diag in diagnostics:
+                if diag.path in seen_paths:
+                    continue
+                if len(self._report.localisation_examples) >= self._diagnostic_example_limit:
+                    break
+                seen_paths.add(diag.path)
+                self._record_localisation_example(str(diag.path), diag.message)
 
-        self._report.localization_override_count = self._count_localization_overrides(
-            merge_result.ordered_files,
-            target_lang,
-        )
+        self._report.localization_override_count = merge_result.override_count
 
         for desc_key, description in merge_result.entries.items():
             self._consume_localization_entry(desc_key, description, target_lang)
@@ -171,11 +212,21 @@ class IntegratedIngestionPipeline:
         self._print_localization_report()
 
     def _build_manifest(self) -> SourceManifest:
-        resolution = self._resolver.resolve_enabled_mods(
-            self.config.paths.launcher_db_path,
-        )
+        if self._manifest is not None:
+            return self._manifest
 
-        sources: List[Source] = [
+        policy = self.config.load_order.multi_active_playset_selection_policy
+        if policy == "latest_created_then_name_then_id":
+            resolution = self._resolver.resolve_enabled_mods(
+                self.config.paths.launcher_db_path,
+            )
+        else:
+            resolution = self._resolver.resolve_enabled_mods(
+                self.config.paths.launcher_db_path,
+                multi_active_playset_selection_policy=policy,
+            )
+
+        sources: list[Source] = [
             Source(
                 kind="vanilla",
                 id=self._VANILLA_SOURCE_ID,
@@ -186,7 +237,7 @@ class IntegratedIngestionPipeline:
             )
         ]
 
-        seen_roots: Set[str] = set()
+        seen_roots: set[str] = set()
         missing_mod_dirs = 0
         for entry in resolution.entries:
             root_path = self._resolve_mod_root(entry)
@@ -214,7 +265,8 @@ class IntegratedIngestionPipeline:
                 )
             )
 
-        self._manifest = SourceManifest(tuple(sources))
+        manifest = SourceManifest(tuple(sources))
+        self._manifest = manifest
 
         if missing_mod_dirs:
             self._emit(
@@ -235,32 +287,32 @@ class IntegratedIngestionPipeline:
                 f"Warning: {warning}",
             )
 
-        return self._manifest
+        return manifest
 
     def _consume_technology_file(
         self,
         file_ref: FileRef,
-        fragments: List[TechDefinitionFragment],
+        fragments: list[TechDefinitionFragment],
     ) -> None:
         file_path = file_ref.absolute_path
         try:
-            decoded = read_text_with_diagnostics(file_path)
+            decoded = read_text_with_diagnostics(
+                file_path,
+                **self._decode_read_kwargs(),
+            )
         except OSError as exc:
             self._report.tech_files_failed += 1
-            self._record_example(str(file_path), f"{type(exc).__name__}: {exc}")
+            self._record_tech_example(str(file_path), f"{type(exc).__name__}: {exc}")
             return
 
         if decoded.diagnostics.has_warning:
             self._report.tech_files_with_decode_warning += 1
-            self._record_example(
-                str(file_path), format_decode_warning(decoded.diagnostics)
-            )
 
         parsed = parse(decoded.text, path=str(file_path))
         if parsed.diagnostics:
             self._report.tech_files_with_parse_diagnostics += 1
             self._report.tech_parse_diagnostic_count += len(parsed.diagnostics)
-            self._record_example(str(file_path), parsed.diagnostics[0].format())
+            self._record_tech_example(str(file_path), parsed.diagnostics[0].format())
 
         extracted = self._extractor.extract_from_root(
             parsed.root, source=str(file_path)
@@ -277,17 +329,19 @@ class IntegratedIngestionPipeline:
             tech.tier_level = merged.tier
         tech.prerequisite_tech_ids = list(merged.prerequisites)
 
-        if merged.levels == -1:
-            tech.is_repeatable_tech = True
+        # Parsed booleans are authoritative; heuristics are fallback behavior.
         if merged.is_repeatable is not None:
-            tech.is_repeatable_tech = tech.is_repeatable_tech or merged.is_repeatable
+            tech.is_repeatable_tech = merged.is_repeatable
+        elif merged.levels == -1:
+            tech.is_repeatable_tech = True
+
         if merged.is_dangerous is not None:
-            tech.is_dangerous_tech = tech.is_dangerous_tech or merged.is_dangerous
+            tech.is_dangerous_tech = merged.is_dangerous
         return tech
 
     def _collect_swap_variant_ids(
         self,
-        merged_definitions: Dict[str, MergedTechDefinition],
+        merged_definitions: dict[str, MergedTechDefinition],
     ) -> None:
         for tech_id in sorted(merged_definitions):
             merged = merged_definitions[tech_id]
@@ -318,41 +372,35 @@ class IntegratedIngestionPipeline:
         cleaned = self._clean_description_text(description)
         self.tech_descriptions.setdefault(target_tech_id, {})[lang_code] = cleaned
 
-    def _count_tech_overrides(self, fragments: List[TechDefinitionFragment]) -> int:
+    def _count_tech_overrides(self, fragments: list[TechDefinitionFragment]) -> int:
         grouped: dict[str, int] = defaultdict(int)
         for fragment in fragments:
             grouped[fragment.tech_id] += 1
         return sum(max(0, count - 1) for count in grouped.values())
 
-    def _count_localization_overrides(
-        self,
-        ordered_files: tuple[Path, ...],
-        target_lang: str,
-    ) -> int:
-        seen_keys: Set[str] = set()
-        overrides = 0
-        for file_path in ordered_files:
-            try:
-                parsed = parse_localisation_file(
-                    file_path, expected_language=target_lang
-                )
-            except OSError:
-                continue
-            for key in parsed.entries:
-                if key in seen_keys:
-                    overrides += 1
-                else:
-                    seen_keys.add(key)
-        return overrides
-
     def _matches_language(self, file_ref: FileRef, language_code: str) -> bool:
         needle = f"l_{language_code}".casefold()
         return needle in file_ref.relative_path.casefold()
 
-    def _record_example(self, path: str, message: str) -> None:
-        if len(self._report.examples) >= _MAX_EXAMPLES:
+    def _record_tech_example(self, path: str, message: str) -> None:
+        if len(self._report.tech_examples) >= self._diagnostic_example_limit:
             return
-        self._report.examples.append((path, message))
+        self._report.tech_examples.append((path, message))
+
+    def _record_localisation_example(self, path: str, message: str) -> None:
+        if len(self._report.localisation_examples) >= self._diagnostic_example_limit:
+            return
+        self._report.localisation_examples.append((path, message))
+
+    def _decode_read_kwargs(self) -> _DecodeReadKwargs:
+        decode = self.config.decode
+        kwargs: _DecodeReadKwargs = {
+            "preferred_encodings": decode.preferred_encodings,
+            "fallback_encodings": decode.fallback_encodings,
+            "replacement_encoding": decode.replacement_encoding,
+            "on_failure": decode.on_failure,
+        }
+        return kwargs
 
     def _print_tech_report(self) -> None:
         total = self._report.tech_files_total
@@ -360,7 +408,7 @@ class IntegratedIngestionPipeline:
             self._report.tech_files_failed
             + self._report.tech_files_with_parse_diagnostics
         )
-        shown = min(len(self._report.examples), _MAX_EXAMPLES)
+        shown = min(len(self._report.tech_examples), self._diagnostic_example_limit)
         suppressed = max(failed - shown, 0)
         ok = max(total - failed, 0)
 
@@ -376,7 +424,7 @@ class IntegratedIngestionPipeline:
                 suppressed=suppressed,
             ),
         )
-        for path, error in self._report.examples[:_MAX_EXAMPLES]:
+        for path, error in self._report.tech_examples[: self._diagnostic_example_limit]:
             self._emit(
                 StageId.INGEST_TECH,
                 EventKind.WARNING,
@@ -391,7 +439,7 @@ class IntegratedIngestionPipeline:
     def _print_localization_report(self) -> None:
         total = self._report.localization_files_total
         failed = self._report.localization_files_with_diagnostics
-        shown = min(failed, _MAX_EXAMPLES)
+        shown = min(len(self._report.localisation_examples), self._diagnostic_example_limit)
         suppressed = max(failed - shown, 0)
         ok = max(total - failed, 0)
 
@@ -407,19 +455,12 @@ class IntegratedIngestionPipeline:
                 suppressed=suppressed,
             ),
         )
-        if failed:
-            seen_paths: Set[str] = set()
-            for path, error in self._report.examples:
-                if path in seen_paths:
-                    continue
-                self._emit(
-                    StageId.INGEST_L10N,
-                    EventKind.WARNING,
-                    self._l("warn_loc_parse_failure_example", path=path, error=error),
-                )
-                seen_paths.add(path)
-                if len(seen_paths) >= _MAX_EXAMPLES:
-                    break
+        for path, error in self._report.localisation_examples[: self._diagnostic_example_limit]:
+            self._emit(
+                StageId.INGEST_L10N,
+                EventKind.WARNING,
+                self._l("warn_loc_parse_failure_example", path=path, error=error),
+            )
         self._emit(
             StageId.INGEST_L10N,
             EventKind.LOG,
@@ -427,13 +468,13 @@ class IntegratedIngestionPipeline:
             f"{self._report.localization_override_count}",
         )
 
-    def _resolve_mod_root(self, entry: ResolvedModEntry) -> Optional[Path]:
+    def _resolve_mod_root(self, entry: ResolvedModEntry) -> Path | None:
         for candidate in self._candidate_mod_roots(entry):
             if candidate.is_dir():
                 return candidate
         return None
 
-    def _candidate_mod_roots(self, entry: ResolvedModEntry) -> List[Path]:
+    def _candidate_mod_roots(self, entry: ResolvedModEntry) -> list[Path]:
         workshop_root = Path(self.config.paths.mod_folder_path).expanduser()
         user_data_root = Path(self.config.paths.launcher_db_path).expanduser().parent
         local_mod_root = (
@@ -442,7 +483,7 @@ class IntegratedIngestionPipeline:
             else user_data_root / "mod"
         )
 
-        candidates: List[Path] = []
+        candidates: list[Path] = []
 
         def add_candidate(path: Path) -> None:
             expanded = path.expanduser()
@@ -486,21 +527,32 @@ class IntegratedIngestionPipeline:
             if not descriptor_path.exists():
                 continue
             try:
-                descriptor = load_descriptor(descriptor_path)
+                descriptor = load_descriptor(
+                    descriptor_path,
+                    **self._decode_read_kwargs(),
+                )
             except Exception as exc:
-                self._record_example(
-                    str(descriptor_path), f"descriptor read failed: {exc}"
+                self._emit(
+                    StageId.LOAD_ORDER,
+                    EventKind.WARNING,
+                    f"Warning: mod descriptor read failed: {descriptor_path}: {exc}",
                 )
                 continue
             for diagnostic in descriptor.parse_diagnostics[:1]:
-                self._record_example(str(descriptor_path), diagnostic.format())
+                self._emit(
+                    StageId.LOAD_ORDER,
+                    EventKind.WARNING,
+                    f"Warning: mod descriptor diagnostic: {descriptor_path}: {diagnostic.format()}",
+                )
             if (
                 descriptor.decode_diagnostics is not None
                 and descriptor.decode_diagnostics.has_warning
             ):
-                self._record_example(
-                    str(descriptor_path),
-                    format_decode_warning(descriptor.decode_diagnostics),
+                self._emit(
+                    StageId.LOAD_ORDER,
+                    EventKind.WARNING,
+                    f"Warning: mod descriptor decode warning: {descriptor_path}: "
+                    f"{format_decode_warning(descriptor.decode_diagnostics)}",
                 )
             if descriptor.replace_paths:
                 return descriptor.replace_paths
@@ -511,7 +563,7 @@ class IntegratedIngestionPipeline:
         entry: ResolvedModEntry,
         root_path: Path,
     ) -> tuple[Path, ...]:
-        candidates: List[Path] = [root_path / "descriptor.mod"]
+        candidates: list[Path] = [root_path / "descriptor.mod"]
 
         user_data_root = Path(self.config.paths.launcher_db_path).expanduser().parent
         local_mod_root = (
@@ -527,8 +579,8 @@ class IntegratedIngestionPipeline:
         local_descriptor = local_mod_root / f"{root_path.name}.mod"
         candidates.append(local_descriptor)
 
-        deduped: List[Path] = []
-        seen: Set[Path] = set()
+        deduped: list[Path] = []
+        seen: set[Path] = set()
         for candidate in candidates:
             if candidate in seen:
                 continue

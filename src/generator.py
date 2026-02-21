@@ -1,38 +1,46 @@
 from pathlib import Path
-from typing import Dict, Set
 
-from config import GeneratorConfig
-from dtt_core.config_loader import ConfigLoader
 from dtt_core.cycle import CycleDetector
 from dtt_core.events import EventKind, EventSink, GenerationEvent, StageId
-from dtt_core.generate_localization import GenerationSteps, GenerateLocalizationUseCase
+from dtt_core.generate_localization import GenerateLocalizationUseCase, GenerationSteps
 from dtt_core.ingestion_pipeline import IntegratedIngestionPipeline
 from dtt_core.output import OutputWriter
 from dtt_core.relations import RelationsBuilder
 from dtt_core.render import TreeRenderer
-from dtt_core.save_context import SaveContext
+from dtt_core.settings_snapshot import (
+    generator_config_from_settings,
+    require_settings_snapshot,
+)
 from dtt_core.stats import StatsReporter
 from dtt_core.stdout_event_sink import StdoutEventSink
 from dtt_core.tech_merge import MergedTechDefinition
 from dtt_core.trigger_evaluator import EmpireProfile
 from localization import LOCALIZATION_STRINGS, RESEARCH_AREA_ICONS
 from models import Technology
+from settings import Settings
+from threading import Event
 
 
 class TechTreeGenerator:
-    def __init__(self, config_path: str):
+    def __init__(
+        self,
+        *,
+        settings: Settings | None = None,
+        application_root: Path | str | None = None,
+    ):
         self._event_sink: EventSink = StdoutEventSink()
-        self.all_technologies: Dict[str, Technology] = {}
+        self._cancel_event: Event | None = None
+        self.all_technologies: dict[str, Technology] = {}
         self.base_game_tech_ids = set()
         self.tech_descriptions = {}
-        self.merged_tech_definitions: Dict[str, MergedTechDefinition] = {}
+        self.merged_tech_definitions: dict[str, MergedTechDefinition] = {}
         self.overlong_tech_ids = set()
-
-        self._config_loader = ConfigLoader(LOCALIZATION_STRINGS)
-        self.config: GeneratorConfig = self._config_loader.load_configuration(
-            config_path
+        self._application_root = (
+            Path(application_root) if application_root is not None else None
         )
-        self._config_loader.set_config(self.config)
+
+        self._settings_snapshot = require_settings_snapshot(settings)
+        self.config = generator_config_from_settings(self._settings_snapshot)
         self._ingestion_pipeline = IntegratedIngestionPipeline(
             config=self.config,
             localize=self._l,
@@ -66,6 +74,7 @@ class TechTreeGenerator:
             localize=self._l,
             generate_tech_tree_content=self.generate_tech_tree_content,
             merged_tech_definitions=self.merged_tech_definitions,
+            application_root=self._application_root,
             event_sink=self._event_sink,
         )
         self._stats_reporter = StatsReporter(
@@ -79,8 +88,28 @@ class TechTreeGenerator:
             event_sink=self._event_sink,
         )
 
+    @classmethod
+    def from_settings(
+        cls,
+        settings: Settings | None,
+        *,
+        application_root: Path | str | None = None,
+    ) -> "TechTreeGenerator":
+        return cls(settings=settings, application_root=application_root)
+
     def _l(self, key: str, **kwargs) -> str:
-        return self._config_loader.l(key, **kwargs)
+        lang_code = self.config.localization.target_language_code
+        lang_dict = LOCALIZATION_STRINGS.get(
+            lang_code,
+            LOCALIZATION_STRINGS.get("english", {}),
+        )
+        base = lang_dict.get(key)
+        if base is None:
+            base = LOCALIZATION_STRINGS.get("english", {}).get(key, key)
+        try:
+            return base.format(**kwargs)
+        except Exception:
+            return base
 
     def scan_all_technology_files(self) -> None:
         self._ingestion_pipeline.scan_all_technology_files()
@@ -108,6 +137,11 @@ class TechTreeGenerator:
         self._output_writer.set_event_sink(sink)
         self._stats_reporter.set_event_sink(sink)
 
+    def _set_cancel_event(self, cancel_event: Event | None) -> None:
+        self._cancel_event = cancel_event
+        self._ingestion_pipeline.set_cancel_event(cancel_event)
+        self._output_writer.set_cancel_event(cancel_event)
+
     def _emit_event(
         self,
         stage_id: StageId,
@@ -127,20 +161,21 @@ class TechTreeGenerator:
             )
         )
 
-    def _emit_overlong_tree_roots(self, limit: int = 50) -> None:
+    def _emit_overlong_tree_roots(self) -> None:
         T = self.config.display.max_display_nodes
         if T <= 0:
             return
         roots = sorted(self.overlong_tech_ids)
         if not roots:
             return
+        limit = self.config.diagnostics.overlong_tree_roots_log_limit
         self._emit_event(
             StageId.RENDER,
             EventKind.LOG,
             self._l("overbreadth_list_header"),
         )
         for idx, tid in enumerate(roots):
-            if idx >= limit:
+            if limit > 0 and idx >= limit:
                 remaining = len(roots) - limit
                 self._emit_event(
                     StageId.RENDER,
@@ -164,12 +199,17 @@ class TechTreeGenerator:
     def _set_empire_profile(self, profile: EmpireProfile) -> None:
         self._output_writer.empire_profile = profile
 
-    def _resolve_country_id_for_use_case(
-        self,
-        save_context: SaveContext,
-        country_id: int | None,
-    ) -> int:
-        return self._resolve_country_id(save_context, country_id=country_id)
+    def _require_settings_snapshot(self, settings: Settings | None) -> Settings:
+        return require_settings_snapshot(settings)
+
+    def _apply_settings_snapshot(self, settings: Settings) -> None:
+        self._settings_snapshot = require_settings_snapshot(settings)
+        self.config = generator_config_from_settings(self._settings_snapshot)
+        self._ingestion_pipeline.apply_config(self.config)
+        self._relations_builder.display_config = self.config.display
+        self._tree_renderer.display_config = self.config.display
+        self._output_writer.config = self.config
+        self._stats_reporter.config = self.config
 
     def _build_generate_localization_use_case(self) -> GenerateLocalizationUseCase:
         return GenerateLocalizationUseCase(
@@ -177,7 +217,6 @@ class TechTreeGenerator:
             event_sink=self._event_sink,
             steps=GenerationSteps(
                 require_save_path=self._require_save_path,
-                resolve_country_id=self._resolve_country_id_for_use_case,
                 set_empire_profile=self._set_empire_profile,
                 scan_all_technology_files=self.scan_all_technology_files,
                 build_technology_tree_relationships=self.build_technology_tree_relationships,
@@ -186,6 +225,8 @@ class TechTreeGenerator:
                 report_circular_dependencies=self.report_circular_dependencies,
                 display_generation_statistics=self.display_generation_statistics,
                 generate_all_yml_files=self.generate_all_yml_files,
+                require_settings=self._require_settings_snapshot,
+                apply_settings_snapshot=self._apply_settings_snapshot,
             ),
         )
 
@@ -193,8 +234,8 @@ class TechTreeGenerator:
         self,
         tech_id: str,
         lang_code: str = "simp_chinese",
-        display_overrides: Dict[str, str] | None = None,
-        allowed_tech_ids: Set[str] | None = None,
+        display_overrides: dict[str, str] | None = None,
+        allowed_tech_ids: set[str] | None = None,
     ) -> str:
         return self._tree_renderer.generate_tech_tree_content(
             tech_id,
@@ -219,38 +260,40 @@ class TechTreeGenerator:
 
         return Path(save_path_text)
 
-    def _resolve_country_id(
-        self,
-        save_context: SaveContext,
-        *,
-        country_id: int | None,
-    ) -> int:
-        if country_id is not None:
-            return country_id
-
-        candidates = tuple(sorted(save_context.player_country_candidates))
-        if len(candidates) == 1:
-            return candidates[0]
-
-        candidate_list = ", ".join(str(candidate) for candidate in candidates)
-        raise ValueError(
-            "ambiguous player empire: country_id is required when save contains "
-            f"{len(candidates)} player candidates; candidates=[{candidate_list}]"
-        )
-
     def run_generation_process(
         self,
         save_path: Path | str | None = None,
         *,
         country_id: int | None = None,
         event_sink: EventSink | None = None,
+        cancel_event: Event | None = None,
+    ):
+        self.run_generation_process_with_settings(
+            save_path=save_path,
+            settings=self._settings_snapshot,
+            country_id=country_id,
+            event_sink=event_sink,
+            cancel_event=cancel_event,
+        )
+
+    def run_generation_process_with_settings(
+        self,
+        save_path: Path | str | None = None,
+        *,
+        settings: Settings | None,
+        country_id: int | None = None,
+        event_sink: EventSink | None = None,
+        cancel_event: Event | None = None,
     ):
         self._set_event_sink(event_sink)
+        self._set_cancel_event(cancel_event)
         use_case = self._build_generate_localization_use_case()
         try:
-            use_case.run(
+            use_case.run_with_settings(
+                settings=settings,
                 save_path=save_path,
                 country_id=country_id,
+                cancel_event=cancel_event,
             )
         except Exception as e:
             try:
@@ -264,3 +307,5 @@ class TechTreeGenerator:
                 details=(("error_type", type(e).__name__),),
             )
             raise
+        finally:
+            self._set_cancel_event(None)

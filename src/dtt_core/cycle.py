@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Set
+from collections.abc import Callable
 
 from dtt_core.events import (
     EventKind,
@@ -13,7 +13,7 @@ from models import Technology
 class CycleDetector:
     def __init__(
         self,
-        all_technologies: Dict[str, Technology],
+        all_technologies: dict[str, Technology],
         localize: Callable[..., str],
         event_sink: EventSink | None = None,
     ) -> None:
@@ -35,11 +35,11 @@ class CycleDetector:
             )
         )
 
-    def detect_circular_dependencies(self) -> List[List[str]]:
-        cycles: List[List[str]] = []
-        visited: Set[str] = set()
-        on_path: Set[str] = set()
-        stack: List[str] = []
+    def detect_circular_dependencies(self) -> list[list[str]]:
+        cycles: list[list[str]] = []
+        visited: set[str] = set()
+        on_path: set[str] = set()
+        stack: list[str] = []
 
         def dfs(node: str) -> None:
             visited.add(node)

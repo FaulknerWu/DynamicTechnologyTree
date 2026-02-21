@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import Callable, Dict, Set
+from collections.abc import Callable
 
 from config import GeneratorConfig
 from dtt_core.events import (
@@ -15,10 +15,10 @@ from models import Technology
 class StatsReporter:
     def __init__(
         self,
-        all_technologies: Dict[str, Technology],
-        base_game_tech_ids: Set[str],
-        tech_descriptions: Dict[str, Dict[str, str]],
-        overlong_tech_ids: Set[str],
+        all_technologies: dict[str, Technology],
+        base_game_tech_ids: set[str],
+        tech_descriptions: dict[str, dict[str, str]],
+        overlong_tech_ids: set[str],
         config: GeneratorConfig,
         localize: Callable[..., str],
         print_overlong_tree_roots: Callable[[], None],
@@ -47,7 +47,7 @@ class StatsReporter:
             )
         )
 
-    def calculate_generation_statistics(self) -> Dict[str, object]:
+    def calculate_generation_statistics(self) -> dict[str, object]:
         stats = {
             "total": len(self.all_technologies),
             "base": len(self.base_game_tech_ids),

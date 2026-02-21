@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
 
 from config import DisplayConfig
 from localization import LOCALIZATION_STRINGS, RESEARCH_AREA_ICONS
@@ -19,8 +18,8 @@ class RenderContext:
     max_children: int  # Y limit
     max_nodes: int  # T limit
     lang_code: str
-    display_overrides: Optional[Dict[str, str]]
-    allowed_tech_ids: Optional[Set[str]]
+    display_overrides: dict[str, str] | None
+    allowed_tech_ids: set[str] | None
     suppress_overflow_line: bool
     # Pre-computed localized strings
     already_shown_text: str = ""
@@ -32,13 +31,12 @@ class RenderContext:
 class RenderState:
     """Mutable state during rendering."""
 
-    lines: List[str] = field(default_factory=list)
-    visited_unique: Set[str] = field(default_factory=set)
+    lines: list[str] = field(default_factory=list)
+    visited_unique: set[str] = field(default_factory=set)
     overflow: bool = False
 
 
 class TreeRenderer:
-    MAX_PREREQ_DISPLAY = 2
     ELLIPSIS = "…"
 
     # Some Stellaris UI fonts (notably the Latin set) don't include Unicode
@@ -50,11 +48,11 @@ class TreeRenderer:
 
     def __init__(
         self,
-        all_technologies: Dict[str, Technology],
+        all_technologies: dict[str, Technology],
         display_config: DisplayConfig,
-        localization_strings: Dict[str, Dict[str, str]] = LOCALIZATION_STRINGS,
-        research_area_icons: Dict[str, str] = RESEARCH_AREA_ICONS,
-        overlong_tech_ids: Optional[Set[str]] = None,
+        localization_strings: dict[str, dict[str, str]] = LOCALIZATION_STRINGS,
+        research_area_icons: dict[str, str] = RESEARCH_AREA_ICONS,
+        overlong_tech_ids: set[str] | None = None,
     ) -> None:
         self.all_technologies = all_technologies
         self.display_config = display_config
@@ -63,7 +61,7 @@ class TreeRenderer:
         self.overlong_tech_ids = overlong_tech_ids
 
     def _format_single_tech(
-        self, tech: Technology, display_id: Optional[str] = None
+        self, tech: Technology, display_id: str | None = None
     ) -> str:
         display_id = display_id or tech.tech_id
         area_icon = self.research_area_icons.get(tech.research_area, "")
@@ -81,8 +79,8 @@ class TreeRenderer:
         prefix_bars: list[bool],
         current_prereq: str = "",  # type: ignore
         lang_code: str = "simp_chinese",
-        display_overrides: Optional[Dict[str, str]] = None,
-        allowed_tech_ids: Optional[Set[str]] = None,
+        display_overrides: dict[str, str] | None = None,
+        allowed_tech_ids: set[str] | None = None,
         collapsed: bool = False,
         is_last: bool = False,
     ) -> str:
@@ -126,9 +124,14 @@ class TreeRenderer:
                 lang_code, self.localization_strings["english"]
             )
             requires_text = strings.get("requires", "Requires")
-            if len(additional_prereqs) > self.MAX_PREREQ_DISPLAY:
-                display_list = additional_prereqs[: self.MAX_PREREQ_DISPLAY]
-                display_text = " , ".join(display_list) + f" {self.ELLIPSIS}"
+            max_prereq_display = self.display_config.max_prereq_display
+            if len(additional_prereqs) > max_prereq_display:
+                display_list = additional_prereqs[:max_prereq_display]
+                display_text = " , ".join(display_list)
+                if display_text:
+                    display_text += f" {self.ELLIPSIS}"
+                else:
+                    display_text = self.ELLIPSIS
             else:
                 display_text = " , ".join(additional_prereqs)
             prereq_suffix = f" [§R{requires_text}§! {display_text}]"
@@ -136,19 +139,19 @@ class TreeRenderer:
         return f"{line_prefix}{formatted}{prereq_suffix}{collapse_suffix}"
 
     def _is_tech_allowed(
-        self, tech_id: str, allowed_tech_ids: Optional[Set[str]]
+        self, tech_id: str, allowed_tech_ids: set[str] | None
     ) -> bool:
         return allowed_tech_ids is None or tech_id in allowed_tech_ids
 
     def _compute_actual_max_depth(
-        self, root_id: str, allowed_tech_ids: Optional[Set[str]] = None
+        self, root_id: str, allowed_tech_ids: set[str] | None = None
     ) -> int:
         if root_id not in self.all_technologies:
             return 0
         if not self._is_tech_allowed(root_id, allowed_tech_ids):
             return 0
         max_depth = 0
-        visited: Set[str] = set()
+        visited: set[str] = set()
         stack = [(root_id, 0)]
         while stack:
             nid, d = stack.pop()
@@ -167,7 +170,7 @@ class TreeRenderer:
         return max_depth
 
     def _compute_max_degree_except_root(
-        self, root_id: str, allowed_tech_ids: Optional[Set[str]] = None
+        self, root_id: str, allowed_tech_ids: set[str] | None = None
     ) -> int:
         m = 0
         for tid, tech in self.all_technologies.items():
@@ -184,11 +187,11 @@ class TreeRenderer:
         x: int,
         y: int,
         T: int,
-        allowed_tech_ids: Optional[Set[str]] = None,
+        allowed_tech_ids: set[str] | None = None,
     ) -> int:
         if root_id not in self.all_technologies:
             return 0
-        visited: Set[str] = set()
+        visited: set[str] = set()
 
         def dfs(nid: str, depth: int, is_root: bool):
             if x > 0 and depth > x:
@@ -212,7 +215,7 @@ class TreeRenderer:
         return len(visited)
 
     def _choose_best_xy_for_root(
-        self, root_id: str, allowed_tech_ids: Optional[Set[str]] = None
+        self, root_id: str, allowed_tech_ids: set[str] | None = None
     ):
         if root_id not in self.all_technologies:
             return -1
@@ -286,20 +289,20 @@ class TreeRenderer:
 
     def _count_remaining_unique(
         self,
-        start_nodes: List[str],
+        start_nodes: list[str],
         root_id: str,
         x: int,
         y: int,
         current_depth: int,
-        visited_global: Set[str],
-        allowed_tech_ids: Optional[Set[str]] = None,
+        visited_global: set[str],
+        allowed_tech_ids: set[str] | None = None,
     ) -> int:
         if not start_nodes:
             return 0
         stack = []
         for n in start_nodes:
             stack.append((n, current_depth + 1))
-        local_seen: Set[str] = set()
+        local_seen: set[str] = set()
         while stack:
             nid, d = stack.pop()
             if not self._is_tech_allowed(nid, allowed_tech_ids):
@@ -327,8 +330,8 @@ class TreeRenderer:
         y: int,
         T: int,
         lang_code: str,
-        display_overrides: Optional[Dict[str, str]] = None,
-        allowed_tech_ids: Optional[Set[str]] = None,
+        display_overrides: dict[str, str] | None = None,
+        allowed_tech_ids: set[str] | None = None,
         suppress_overflow_line: bool = False,
     ) -> RenderContext:
         strings = self.localization_strings.get(
@@ -351,8 +354,8 @@ class TreeRenderer:
         )
 
     def _get_sorted_children(
-        self, tech: Technology, allowed_tech_ids: Optional[Set[str]] = None
-    ) -> List[str]:
+        self, tech: Technology, allowed_tech_ids: set[str] | None = None
+    ) -> list[str]:
         children = [
             cid
             for cid in tech.unlocked_tech_ids
@@ -367,8 +370,8 @@ class TreeRenderer:
         )
 
     def _apply_children_limit(
-        self, children: List[str], is_root: bool, max_children: int
-    ) -> Tuple[List[str], bool]:
+        self, children: list[str], is_root: bool, max_children: int
+    ) -> tuple[list[str], bool]:
         if (not is_root) and max_children > 0 and len(children) > max_children:
             return children[:max_children], True
         return children, False
@@ -377,10 +380,10 @@ class TreeRenderer:
         self,
         ctx: RenderContext,
         state: RenderState,
-        display_children: List[str],
+        display_children: list[str],
         idx: int,
         parent_depth: int,
-        prefix_bars: List[bool],
+        prefix_bars: list[bool],
     ) -> bool:
         if ctx.max_nodes > 0 and len(state.visited_unique) >= ctx.max_nodes:
             remaining_nodes = display_children[idx:]
@@ -414,7 +417,7 @@ class TreeRenderer:
         parent_id: str,
         child_id: str,
         parent_depth: int,
-        prefix_bars: List[bool],
+        prefix_bars: list[bool],
         has_more_siblings: bool,
     ) -> None:
         line = self._format_tech_tree_entry(
@@ -452,7 +455,7 @@ class TreeRenderer:
         ctx: RenderContext,
         state: RenderState,
         hidden: int,
-        prefix_bars: List[bool],
+        prefix_bars: list[bool],
     ) -> None:
         if hidden <= 0:
             return
@@ -471,10 +474,10 @@ class TreeRenderer:
         ctx: RenderContext,
         state: RenderState,
         parent_id: str,
-        children: List[str],
+        children: list[str],
         parent_depth: int,
         is_root: bool,
-        prefix_bars: List[bool],
+        prefix_bars: list[bool],
     ) -> None:
         if state.overflow:
             return
@@ -507,10 +510,10 @@ class TreeRenderer:
         y: int,
         T: int,
         lang_code: str,
-        display_overrides: Optional[Dict[str, str]] = None,
-        allowed_tech_ids: Optional[Set[str]] = None,
+        display_overrides: dict[str, str] | None = None,
+        allowed_tech_ids: set[str] | None = None,
         suppress_overflow_line: bool = False,
-    ) -> Tuple[List[str], bool]:
+    ) -> tuple[list[str], bool]:
         if root_id not in self.all_technologies:
             return [], False
         ctx = self._create_render_context(
@@ -542,7 +545,7 @@ class TreeRenderer:
         tech_id: str,
         T: int,
         lang_code: str,
-        allowed_tech_ids: Optional[Set[str]] = None,
+        allowed_tech_ids: set[str] | None = None,
     ) -> bool:
         root = self.all_technologies[tech_id]
         root_children_count = len(self._get_sorted_children(root, allowed_tech_ids))
@@ -561,8 +564,8 @@ class TreeRenderer:
         return content.replace("\n", "\\n")
 
     def _get_raw_render_params(
-        self, tech_id: str, allowed_tech_ids: Optional[Set[str]] = None
-    ) -> Tuple[int, int]:
+        self, tech_id: str, allowed_tech_ids: set[str] | None = None
+    ) -> tuple[int, int]:
         max_tree_depth = self.display_config.max_tree_depth
         raw_x = (
             max_tree_depth
@@ -582,8 +585,8 @@ class TreeRenderer:
         y: int,
         T: int,
         lang_code: str,
-        display_overrides: Optional[Dict[str, str]] = None,
-        allowed_tech_ids: Optional[Set[str]] = None,
+        display_overrides: dict[str, str] | None = None,
+        allowed_tech_ids: set[str] | None = None,
     ) -> str:
         lines_stage_final, _ = self._render_tree_with_limits(
             tech_id,
@@ -607,8 +610,8 @@ class TreeRenderer:
         tech_id: str,
         T: int,
         lang_code: str,
-        display_overrides: Optional[Dict[str, str]] = None,
-        allowed_tech_ids: Optional[Set[str]] = None,
+        display_overrides: dict[str, str] | None = None,
+        allowed_tech_ids: set[str] | None = None,
     ) -> str:
         chosen = self._choose_best_xy_for_root(tech_id, allowed_tech_ids)
         if chosen == -1:
@@ -629,8 +632,8 @@ class TreeRenderer:
         self,
         tech_id: str,
         lang_code: str = "simp_chinese",
-        display_overrides: Optional[Dict[str, str]] = None,
-        allowed_tech_ids: Optional[Set[str]] = None,
+        display_overrides: dict[str, str] | None = None,
+        allowed_tech_ids: set[str] | None = None,
     ) -> str:
         if tech_id not in self.all_technologies:
             return ""

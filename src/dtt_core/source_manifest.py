@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import posixpath
 from dataclasses import dataclass
 from pathlib import Path
-import posixpath
-from typing import Iterable, Literal
+from typing import Literal
+from collections.abc import Iterator
 
 SourceKind = Literal["vanilla", "mod"]
 Domain = Literal["technology", "localisation"]
@@ -52,7 +53,7 @@ class SourceManifest:
     def __post_init__(self) -> None:
         object.__setattr__(self, "ordered_sources", tuple(self.ordered_sources))
 
-    def __iter__(self) -> Iterable[Source]:
+    def __iter__(self) -> Iterator[Source]:
         return iter(self.ordered_sources)
 
 

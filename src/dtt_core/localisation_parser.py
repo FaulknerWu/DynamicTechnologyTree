@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from threading import Event
+from collections.abc import Iterable, Sequence
 
-from dtt_core.file_decode import format_decode_warning, read_text_with_diagnostics
+from config import DEFAULT_DECODE_REPLACEMENT_ENCODING, DecodeFailurePolicy
+from dtt_core.file_decode import (
+    DEFAULT_FAILURE_POLICY,
+    DEFAULT_FALLBACK_ENCODINGS,
+    PREFERRED_ENCODINGS,
+    format_decode_warning,
+    read_text_with_diagnostics,
+)
 from dtt_core.source_manifest import normalize_manifest_path
 
 _HEADER_PREFIX = "l_"
@@ -36,6 +44,7 @@ class LocalisationMergeResult:
     entries: dict[str, str]
     diagnostics: tuple[LocalisationDiagnostic, ...]
     ordered_files: tuple[Path, ...]
+    override_count: int
 
 
 @dataclass(frozen=True)
@@ -50,9 +59,19 @@ def parse_localisation_file(
     path: Path,
     *,
     expected_language: str | None = None,
+    preferred_encodings: Sequence[str] = PREFERRED_ENCODINGS,
+    fallback_encodings: Sequence[str] = DEFAULT_FALLBACK_ENCODINGS,
+    replacement_encoding: str = DEFAULT_DECODE_REPLACEMENT_ENCODING,
+    on_failure: DecodeFailurePolicy = DEFAULT_FAILURE_POLICY,
 ) -> ParsedLocalisationFile:
     file_path = Path(path)
-    decoded = read_text_with_diagnostics(file_path)
+    decoded = read_text_with_diagnostics(
+        file_path,
+        preferred_encodings=preferred_encodings,
+        fallback_encodings=fallback_encodings,
+        replacement_encoding=replacement_encoding,
+        on_failure=on_failure,
+    )
     parsed = parse_localisation_text(
         decoded.text,
         path=file_path,
@@ -151,25 +170,39 @@ def merge_localisation_file_stream(
     file_stream: Iterable[object],
     *,
     expected_language: str | None = None,
+    preferred_encodings: Sequence[str] = PREFERRED_ENCODINGS,
+    fallback_encodings: Sequence[str] = DEFAULT_FALLBACK_ENCODINGS,
+    replacement_encoding: str = DEFAULT_DECODE_REPLACEMENT_ENCODING,
+    on_failure: DecodeFailurePolicy = DEFAULT_FAILURE_POLICY,
+    cancel_event: Event | None = None,
 ) -> LocalisationMergeResult:
     ordered_files = _order_file_stream(file_stream)
     merged_entries: dict[str, str] = {}
     diagnostics: list[LocalisationDiagnostic] = []
     merge_order: list[Path] = []
+    override_count = 0
 
     for ordered_file in ordered_files:
+        if cancel_event is not None and cancel_event.is_set():
+            break
         parsed = parse_localisation_file(
             ordered_file.path,
             expected_language=expected_language,
+            preferred_encodings=preferred_encodings,
+            fallback_encodings=fallback_encodings,
+            replacement_encoding=replacement_encoding,
+            on_failure=on_failure,
         )
         merge_order.append(ordered_file.path)
         diagnostics.extend(parsed.diagnostics)
+        override_count += len(merged_entries.keys() & parsed.entries.keys())
         merged_entries.update(parsed.entries)
 
     return LocalisationMergeResult(
         entries=merged_entries,
         diagnostics=tuple(diagnostics),
         ordered_files=tuple(merge_order),
+        override_count=override_count,
     )
 
 

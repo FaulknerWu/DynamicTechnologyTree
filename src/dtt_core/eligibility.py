@@ -1,13 +1,13 @@
-from __future__ import annotations
-
 """Strict save-profile eligibility filtering for technology trees.
 
 Potential evaluation targets a single empire profile (typically save-derived).
 Unknown potential results are treated as excluded and reported explicitly.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Mapping, Set
+from collections.abc import Iterable, Mapping
 
 from dtt_core.tech_merge import MergedTechDefinition
 from dtt_core.trigger_evaluator import (
@@ -16,7 +16,6 @@ from dtt_core.trigger_evaluator import (
     TriggerEvaluator,
 )
 from models import Technology
-
 
 _DEFAULT_SAMPLE_SIZE = 5
 _DEFAULT_UNKNOWN_WARNING_THRESHOLD = 1
@@ -137,9 +136,9 @@ def _sorted_unique(values: Iterable[str]) -> tuple[str, ...]:
 
 def _apply_prerequisite_closure(
     all_technologies: Mapping[str, Technology],
-    allowed_ids: Set[str],
+    allowed_ids: set[str],
     excluded_by_prereq: dict[str, PrerequisiteExclusionDetail],
-) -> Set[str]:
+) -> set[str]:
     closed_allowed_ids = set(allowed_ids)
     while True:
         removals: list[tuple[str, tuple[str, ...]]] = []
@@ -171,7 +170,7 @@ def _build_unknown_predicate_frequency(
     *,
     sample_size: int,
 ) -> dict[str, UnknownPredicateFrequency]:
-    unknown_to_tech_ids: Dict[str, Set[str]] = {}
+    unknown_to_tech_ids: dict[str, set[str]] = {}
     for tech_id in sorted(unknown_predicates_by_tech_id):
         unknown_predicates = unknown_predicates_by_tech_id[tech_id].unknown_predicates
         for predicate in unknown_predicates:
@@ -195,13 +194,13 @@ def build_allowed_tech_ids_for_empire(
     evaluator: TriggerEvaluator | None = None,
     sample_size: int = _DEFAULT_SAMPLE_SIZE,
     unknown_warning_threshold: int = _DEFAULT_UNKNOWN_WARNING_THRESHOLD,
-) -> tuple[Set[str], EligibilityReport]:
+) -> tuple[set[str], EligibilityReport]:
     normalized_sample_size = max(sample_size, 0)
     merged_lookup = merged_tech_definitions or {}
     trigger_evaluator = evaluator if evaluator is not None else TriggerEvaluator()
 
     report = EligibilityReport(sample_size=normalized_sample_size)
-    allowed_ids: Set[str] = set()
+    allowed_ids: set[str] = set()
 
     for tech_id in sorted(all_technologies):
         merged = merged_lookup.get(tech_id)

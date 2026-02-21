@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import sqlite3
+import warnings as py_warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-import sqlite3
-from typing import Any, Optional
-import warnings as py_warnings
+from typing import Any
+
+from config import (
+    DEFAULT_MULTI_ACTIVE_PLAYSET_SELECTION_POLICY,
+    MultiActivePlaysetSelectionPolicy,
+)
+from dtt_core.typed_error import TypedCoreError, TypedErrorDetails
 
 
 @dataclass(frozen=True)
@@ -23,7 +29,7 @@ class LoadOrderResolution:
     source: str
     entries: list[ResolvedModEntry] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    database_path: Optional[Path] = None
+    database_path: Path | None = None
     migration_names: list[str] = field(default_factory=list)
 
     @property
@@ -31,36 +37,30 @@ class LoadOrderResolution:
         return [entry.raw_entry for entry in self.entries]
 
 
-class LoadOrderResolutionError(RuntimeError):
-    def __init__(self, *, code: str, database_path: Path, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.database_path = database_path
+class LoadOrderResolutionError(TypedCoreError):
+    def __init__(self, *, code: str, details: TypedErrorDetails = ()) -> None:
+        super().__init__(code=code, details=details)
 
 
 class LoadOrderResolver:
     def resolve_enabled_mods(
         self,
         launcher_db_path: str | Path | None,
+        *,
+        multi_active_playset_selection_policy: MultiActivePlaysetSelectionPolicy = (
+            DEFAULT_MULTI_ACTIVE_PLAYSET_SELECTION_POLICY
+        ),
     ) -> LoadOrderResolution:
         db_path = self._normalize_database_path(launcher_db_path)
         if not db_path.exists():
             raise LoadOrderResolutionError(
                 code="missing_database",
-                database_path=db_path,
-                message=(
-                    f"Launcher DB not found at {db_path}. "
-                    "Set [paths] launcher_db_path to launcher-v2.sqlite."
-                ),
+                details=(("path", str(db_path)),),
             )
         if not db_path.is_file():
             raise LoadOrderResolutionError(
                 code="database_not_file",
-                database_path=db_path,
-                message=(
-                    f"Launcher DB path is not a file: {db_path}. "
-                    "Set [paths] launcher_db_path to launcher-v2.sqlite."
-                ),
+                details=(("path", str(db_path)),),
             )
 
         warnings: list[str] = []
@@ -77,6 +77,7 @@ class LoadOrderResolver:
                 playset_columns,
                 warnings,
                 db_path,
+                multi_active_playset_selection_policy,
             )
 
             entries = self._read_playset_mod_entries(
@@ -106,22 +107,14 @@ class LoadOrderResolver:
         if launcher_db_path is None:
             raise LoadOrderResolutionError(
                 code="missing_database_path",
-                database_path=Path("<unset>"),
-                message=(
-                    "Missing [paths] launcher_db_path in config. "
-                    "Set it to the launcher-v2.sqlite file path."
-                ),
+                details=(("path", "<unset>"),),
             )
 
         path_text = str(launcher_db_path).strip()
         if not path_text:
             raise LoadOrderResolutionError(
                 code="empty_database_path",
-                database_path=Path("<unset>"),
-                message=(
-                    "[paths] launcher_db_path is empty. "
-                    "Set it to the launcher-v2.sqlite file path."
-                ),
+                details=(("path", "<unset>"),),
             )
         return Path(path_text).expanduser()
 
@@ -147,29 +140,17 @@ class LoadOrderResolver:
         if "locked" in lowered:
             return LoadOrderResolutionError(
                 code="database_locked",
-                database_path=db_path,
-                message=(
-                    f"Launcher DB is locked at {db_path}: {text}. "
-                    "Close Paradox Launcher or wait for it to finish writing, then retry."
-                ),
+                details=(("path", str(db_path)), ("reason", text)),
             )
         if "unable to open database file" in lowered:
             return LoadOrderResolutionError(
                 code="open_failed",
-                database_path=db_path,
-                message=(
-                    f"Failed to open launcher DB at {db_path}: {text}. "
-                    "Check file permissions and verify launcher_db_path points to launcher-v2.sqlite."
-                ),
+                details=(("path", str(db_path)), ("reason", text)),
             )
 
         return LoadOrderResolutionError(
             code="read_failed",
-            database_path=db_path,
-            message=(
-                f"Failed to read launcher DB at {db_path}: {text}. "
-                "Verify the launcher-v2.sqlite file is readable."
-            ),
+            details=(("path", str(db_path)), ("reason", text)),
         )
 
     def _map_database_error(
@@ -183,20 +164,12 @@ class LoadOrderResolver:
         if "file is not a database" in lowered or "malformed" in lowered:
             return LoadOrderResolutionError(
                 code="corrupt_database",
-                database_path=db_path,
-                message=(
-                    f"Launcher DB at {db_path} is corrupt: {text}. "
-                    "Point launcher_db_path to a valid launcher-v2.sqlite file."
-                ),
+                details=(("path", str(db_path)), ("reason", text)),
             )
 
         return LoadOrderResolutionError(
             code="database_error",
-            database_path=db_path,
-            message=(
-                f"Launcher DB query failed at {db_path}: {text}. "
-                "Verify launcher-v2.sqlite is valid and not being modified."
-            ),
+            details=(("path", str(db_path)), ("reason", text)),
         )
 
     def _read_migration_names(
@@ -237,15 +210,12 @@ class LoadOrderResolver:
         playset_columns: dict[str, str],
         warnings: list[str],
         db_path: Path,
+        multi_active_playset_selection_policy: MultiActivePlaysetSelectionPolicy,
     ) -> str:
         if not playset_columns:
             raise LoadOrderResolutionError(
                 code="schema_playsets_missing",
-                database_path=db_path,
-                message=(
-                    "Launcher DB schema drift: missing playsets table. "
-                    "Verify launcher-v2.sqlite matches current launcher format."
-                ),
+                details=(("path", str(db_path)), ("table", "playsets")),
             )
 
         playset_id_column = self._pick_column(
@@ -255,11 +225,7 @@ class LoadOrderResolver:
         if playset_id_column is None or is_active_column is None:
             raise LoadOrderResolutionError(
                 code="schema_playsets_columns",
-                database_path=db_path,
-                message=(
-                    "Launcher DB schema drift: playsets table missing id/isActive columns. "
-                    "Verify launcher-v2.sqlite matches current launcher format."
-                ),
+                details=(("path", str(db_path)), ("table", "playsets")),
             )
 
         name_column = self._pick_column(playset_columns, "name", "displayName")
@@ -296,11 +262,7 @@ class LoadOrderResolver:
         if not rows:
             raise LoadOrderResolutionError(
                 code="no_active_playset",
-                database_path=db_path,
-                message=(
-                    "No active playset found in launcher DB. "
-                    "Open Paradox Launcher, select an active playset, and retry."
-                ),
+                details=(("path", str(db_path)),),
             )
         if len(rows) == 1:
             return self._safe_str(rows[0]["playset_id"])
@@ -309,7 +271,10 @@ class LoadOrderResolver:
         warnings.append(message)
         py_warnings.warn(message, RuntimeWarning, stacklevel=2)
 
-        if created_on_column is not None:
+        if (
+            multi_active_playset_selection_policy == "latest_created_then_name_then_id"
+            and created_on_column is not None
+        ):
             created_keys = [self._created_sort_key(row["created_on"]) for row in rows]
             latest_key = max(created_keys)
             candidates = [
@@ -341,20 +306,12 @@ class LoadOrderResolver:
         if not playset_mod_columns:
             raise LoadOrderResolutionError(
                 code="schema_playsets_mods_missing",
-                database_path=db_path,
-                message=(
-                    "Launcher DB schema drift: missing playsets_mods table. "
-                    "Verify launcher-v2.sqlite matches current launcher format."
-                ),
+                details=(("path", str(db_path)), ("table", "playsets_mods")),
             )
         if not mod_columns:
             raise LoadOrderResolutionError(
                 code="schema_mods_missing",
-                database_path=db_path,
-                message=(
-                    "Launcher DB schema drift: missing mods table. "
-                    "Verify launcher-v2.sqlite matches current launcher format."
-                ),
+                details=(("path", str(db_path)), ("table", "mods")),
             )
 
         pm_playset_id_column = self._pick_column(
@@ -372,20 +329,12 @@ class LoadOrderResolver:
         if pm_playset_id_column is None or pm_mod_id_column is None:
             raise LoadOrderResolutionError(
                 code="schema_playsets_mods_columns",
-                database_path=db_path,
-                message=(
-                    "Launcher DB schema drift: playsets_mods table missing playsetId/modId columns. "
-                    "Verify launcher-v2.sqlite matches current launcher format."
-                ),
+                details=(("path", str(db_path)), ("table", "playsets_mods")),
             )
         if mods_id_column is None:
             raise LoadOrderResolutionError(
                 code="schema_mods_columns",
-                database_path=db_path,
-                message=(
-                    "Launcher DB schema drift: mods table missing id column. "
-                    "Verify launcher-v2.sqlite matches current launcher format."
-                ),
+                details=(("path", str(db_path)), ("table", "mods")),
             )
 
         mods_dir_path_column = self._pick_column(mod_columns, "dirPath", "dir_path")
@@ -481,7 +430,7 @@ class LoadOrderResolver:
                 columns[name.lower()] = name
         return columns
 
-    def _pick_column(self, columns: dict[str, str], *candidates: str) -> Optional[str]:
+    def _pick_column(self, columns: dict[str, str], *candidates: str) -> str | None:
         for candidate in candidates:
             selected = columns.get(candidate.lower())
             if selected is not None:

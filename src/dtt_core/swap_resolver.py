@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 from dtt_core.tech_extractor import TechnologySwap
 from dtt_core.tech_merge import MergedTechDefinition
@@ -10,6 +10,7 @@ from dtt_core.trigger_evaluator import (
     TriggerEvaluationResult,
     TriggerEvaluator,
 )
+from dtt_core.typed_error import TypedCoreError
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ class SwapResolutionReport:
         return bool(self.collisions)
 
 
-class SwapResolutionCollisionError(RuntimeError):
+class SwapResolutionCollisionError(TypedCoreError):
     def __init__(self, report: SwapResolutionReport) -> None:
         self.report = report
         details = "; ".join(
@@ -51,8 +52,19 @@ class SwapResolutionCollisionError(RuntimeError):
         )
         suffix = details if details else "unknown collisions"
         super().__init__(
+            code="technology_swap_collision",
+            details=(
+                ("collisions", suffix),
+            ),
+        )
+
+    def __str__(self) -> str:  # pragma: no cover - exercised via GUI/event messages
+        collisions = self.details_dict().get("collisions", "").strip()
+        if not collisions:
+            return self.code
+        return (
             "technology_swap resolution produced colliding active display ids: "
-            f"{suffix}"
+            f"{collisions}"
         )
 
 

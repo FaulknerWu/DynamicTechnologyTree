@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 
-PREFERRED_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8")
-DEFAULT_FALLBACK_ENCODINGS: tuple[str, ...] = ("cp1252", "latin-1")
+from config import (
+    DEFAULT_DECODE_FALLBACK_ENCODINGS,
+    DEFAULT_DECODE_PREFERRED_ENCODINGS,
+    DEFAULT_DECODE_REPLACEMENT_ENCODING,
+    DecodeFailurePolicy,
+)
+
+PREFERRED_ENCODINGS: tuple[str, ...] = DEFAULT_DECODE_PREFERRED_ENCODINGS
+DEFAULT_FALLBACK_ENCODINGS: tuple[str, ...] = DEFAULT_DECODE_FALLBACK_ENCODINGS
+DEFAULT_FAILURE_POLICY: DecodeFailurePolicy = "replace"
 
 
 @dataclass(frozen=True)
@@ -31,13 +39,17 @@ class DecodedText:
 def read_text_with_diagnostics(
     path: Path,
     *,
+    preferred_encodings: Sequence[str] = PREFERRED_ENCODINGS,
     fallback_encodings: Sequence[str] = DEFAULT_FALLBACK_ENCODINGS,
-    replacement_encoding: str = "utf-8",
+    replacement_encoding: str = DEFAULT_DECODE_REPLACEMENT_ENCODING,
+    on_failure: DecodeFailurePolicy = DEFAULT_FAILURE_POLICY,
 ) -> DecodedText:
     raw_bytes = path.read_bytes()
+    normalized_preferred = _ordered_unique_encodings(preferred_encodings)
     ordered_encodings = _ordered_unique_encodings(
-        (*PREFERRED_ENCODINGS, *fallback_encodings)
+        (*normalized_preferred, *fallback_encodings)
     )
+    preferred_encoding_set = set(normalized_preferred)
     failed_attempts: list[str] = []
 
     for encoding in ordered_encodings:
@@ -48,7 +60,7 @@ def read_text_with_diagnostics(
                 encoding_used=encoding,
                 attempted_encodings=ordered_encodings,
                 failed_attempts=tuple(failed_attempts),
-                used_fallback_encoding=encoding not in PREFERRED_ENCODINGS,
+                used_fallback_encoding=encoding not in preferred_encoding_set,
                 used_replacement=False,
             )
             return DecodedText(text=text, diagnostics=diagnostics)
@@ -57,11 +69,28 @@ def read_text_with_diagnostics(
         except LookupError as exc:
             failed_attempts.append(f"{encoding}: unknown encoding ({exc})")
 
-    text = raw_bytes.decode(replacement_encoding, errors="replace")
-    failed_attempts.append(f"{replacement_encoding}: replacement characters inserted")
+    normalized_replacement = _normalize_encoding_name(replacement_encoding)
+    if not normalized_replacement:
+        raise ValueError("replacement_encoding must be non-empty")
+
+    if on_failure == "strict":
+        failure_summary = "; ".join(failed_attempts) or "no encodings were attempted"
+        raise UnicodeDecodeError(
+            normalized_replacement,
+            raw_bytes,
+            0,
+            len(raw_bytes),
+            f"all configured decode attempts failed ({failure_summary})",
+        )
+
+    if on_failure != "replace":
+        raise ValueError("on_failure must be one of: replace, strict")
+
+    text = raw_bytes.decode(normalized_replacement, errors="replace")
+    failed_attempts.append(f"{normalized_replacement}: replacement characters inserted")
     diagnostics = DecodeDiagnostics(
         path=path,
-        encoding_used=replacement_encoding,
+        encoding_used=normalized_replacement,
         attempted_encodings=ordered_encodings,
         failed_attempts=tuple(failed_attempts),
         used_fallback_encoding=False,
@@ -83,9 +112,13 @@ def _ordered_unique_encodings(encodings: Sequence[str]) -> tuple[str, ...]:
     ordered: list[str] = []
     seen: set[str] = set()
     for encoding in encodings:
-        normalized = encoding.strip().lower()
+        normalized = _normalize_encoding_name(encoding)
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
         ordered.append(normalized)
     return tuple(ordered)
+
+
+def _normalize_encoding_name(value: str) -> str:
+    return str(value).strip().lower()

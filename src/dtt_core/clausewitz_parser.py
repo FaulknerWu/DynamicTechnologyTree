@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Clausewitz (Paradox) script tokenizer + tolerant AST parser.
 
 This module intentionally stays *pure*: it takes a string and produces an
@@ -7,6 +5,8 @@ order-preserving AST plus diagnostics. It does not evaluate triggers/effects.
 
 Spans are 1-based (line, col) and use an exclusive end position.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -33,7 +33,7 @@ class Span:
     end_col: int
 
     @staticmethod
-    def at(line: int, col: int) -> "Span":
+    def at(line: int, col: int) -> Span:
         return Span(line, col, line, col)
 
 
@@ -67,13 +67,13 @@ class Atom:
 class Assignment:
     key: Token
     op: Token
-    value: "ClausewitzNode"
+    value: ClausewitzNode
     span: Span
 
 
 @dataclass
 class Block:
-    items: list["ClausewitzNode"]
+    items: list[ClausewitzNode]
     span: Span
     lbrace: Token | None = None
     rbrace: Token | None = None

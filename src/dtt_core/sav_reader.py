@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-import zipfile
 
 from dtt_core.clausewitz_parser import (
     Assignment,
@@ -22,10 +22,28 @@ from dtt_core.save_context import SaveContext, SaveEmpireFacts, SaveParseReport
 
 REQUIRED_SAVE_MEMBERS: tuple[str, str] = ("meta", "gamestate")
 
-# Guardrails against decompression bombs. A Stellaris save should be two text
-# members, so a quarter/half-gig cap is generous while still blocking abuse.
-MAX_MEMBER_UNCOMPRESSED_SIZE = 256 * 1024 * 1024
-MAX_TOTAL_UNCOMPRESSED_SIZE = 512 * 1024 * 1024
+
+@dataclass(frozen=True)
+class SaveReaderLimits:
+    max_member_uncompressed_size_bytes: int = 256 * 1024 * 1024
+    max_total_uncompressed_size_bytes: int = 512 * 1024 * 1024
+    max_parse_diagnostics_per_member: int = 20
+
+    def __post_init__(self) -> None:
+        if self.max_member_uncompressed_size_bytes < 0:
+            raise ValueError("max_member_uncompressed_size_bytes must be >= 0")
+        if self.max_total_uncompressed_size_bytes < 0:
+            raise ValueError("max_total_uncompressed_size_bytes must be >= 0")
+        if self.max_parse_diagnostics_per_member < 0:
+            raise ValueError("max_parse_diagnostics_per_member must be >= 0")
+        if (
+            self.max_total_uncompressed_size_bytes
+            < self.max_member_uncompressed_size_bytes
+        ):
+            raise ValueError(
+                "max_total_uncompressed_size_bytes must be >= max_member_uncompressed_size_bytes"
+            )
+
 
 _TRUTHY_LITERALS = frozenset({"yes", "true", "1", "on"})
 _FALSY_LITERALS = frozenset({"no", "false", "0", "off"})
@@ -43,9 +61,17 @@ class _DecodedMember:
     diagnostics: DecodeDiagnostics
 
 
-def load_save_context(save_path: Path | str) -> SaveContext:
+def load_save_context(
+    save_path: Path | str,
+    *,
+    limits: SaveReaderLimits | None = None,
+) -> SaveContext:
     archive_path = Path(save_path)
-    raw_members, member_sizes, compressed_sizes = _read_archive_members(archive_path)
+    resolved_limits = limits or SaveReaderLimits()
+    raw_members, member_sizes, compressed_sizes = _read_archive_members(
+        archive_path,
+        limits=resolved_limits,
+    )
 
     decoded_members: dict[str, _DecodedMember] = {}
     warnings: list[str] = []
@@ -74,18 +100,31 @@ def load_save_context(save_path: Path | str) -> SaveContext:
         path=f"{archive_path}::gamestate",
     )
 
-    warnings.extend(_format_parse_warnings("meta", meta_parse.diagnostics))
-    warnings.extend(_format_parse_warnings("gamestate", gamestate_parse.diagnostics))
+    warnings.extend(
+        _format_parse_warnings(
+            "meta",
+            meta_parse.diagnostics,
+            max_diagnostics=resolved_limits.max_parse_diagnostics_per_member,
+        )
+    )
+    warnings.extend(
+        _format_parse_warnings(
+            "gamestate",
+            gamestate_parse.diagnostics,
+            max_diagnostics=resolved_limits.max_parse_diagnostics_per_member,
+        )
+    )
 
     player_country_candidates = _extract_player_country_candidates(gamestate_parse.root)
-    player_country_id = (
-        player_country_candidates[0] if player_country_candidates else None
-    )
-    if len(player_country_candidates) > 1:
-        warnings.append(
-            "Multiple player country candidates found; using the smallest "
-            f"country_id ({player_country_id})."
-        )
+    if len(player_country_candidates) == 1:
+        player_country_id = player_country_candidates[0]
+    else:
+        player_country_id = None
+        if len(player_country_candidates) > 1:
+            warnings.append(
+                "Multiple player country candidates found; player country is "
+                "ambiguous without an explicit country_id."
+            )
 
     dlc_tokens = _extract_dlc_tokens(meta_parse.root, gamestate_parse.root)
     empires_by_country_id = _extract_empires_by_country(
@@ -117,10 +156,17 @@ def load_save_context(save_path: Path | str) -> SaveContext:
 
 def _read_archive_members(
     archive_path: Path,
+    *,
+    limits: SaveReaderLimits,
 ) -> tuple[dict[str, bytes], dict[str, int], dict[str, int]]:
     try:
         with zipfile.ZipFile(archive_path) as archive:
-            member_sizes, compressed_sizes = _validate_zip_safety(archive, archive_path)
+            member_sizes, compressed_sizes = _validate_zip_safety(
+                archive,
+                archive_path,
+                max_member_uncompressed_size_bytes=limits.max_member_uncompressed_size_bytes,
+                max_total_uncompressed_size_bytes=limits.max_total_uncompressed_size_bytes,
+            )
             raw_members = _read_required_members(archive, archive_path)
             return raw_members, member_sizes, compressed_sizes
     except zipfile.BadZipFile as exc:
@@ -132,6 +178,9 @@ def _read_archive_members(
 def _validate_zip_safety(
     archive: zipfile.ZipFile,
     archive_path: Path,
+    *,
+    max_member_uncompressed_size_bytes: int,
+    max_total_uncompressed_size_bytes: int,
 ) -> tuple[dict[str, int], dict[str, int]]:
     member_sizes: dict[str, int] = {}
     compressed_sizes: dict[str, int] = {}
@@ -142,20 +191,20 @@ def _validate_zip_safety(
         member_sizes[info.filename] = info.file_size
         compressed_sizes[info.filename] = info.compress_size
 
-        if info.file_size > MAX_MEMBER_UNCOMPRESSED_SIZE:
+        if info.file_size > max_member_uncompressed_size_bytes:
             raise SaveReaderError(
                 "Refusing to open untrusted save archive: member "
                 f"'{info.filename}' uncompressed size ({info.file_size} bytes) "
                 "exceeds safe per-member limit "
-                f"({MAX_MEMBER_UNCOMPRESSED_SIZE} bytes)."
+                f"({max_member_uncompressed_size_bytes} bytes)."
             )
 
         total_uncompressed += info.file_size
-        if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_SIZE:
+        if total_uncompressed > max_total_uncompressed_size_bytes:
             raise SaveReaderError(
                 "Refusing to open untrusted save archive: total uncompressed size "
                 f"({total_uncompressed} bytes) exceeds safe total limit "
-                f"({MAX_TOTAL_UNCOMPRESSED_SIZE} bytes)."
+                f"({max_total_uncompressed_size_bytes} bytes)."
             )
 
     return member_sizes, compressed_sizes
@@ -241,14 +290,17 @@ def _looks_like_binary_payload(raw_bytes: bytes) -> bool:
 
 
 def _format_parse_warnings(
-    member_name: str, diagnostics: list[Diagnostic]
+    member_name: str,
+    diagnostics: list[Diagnostic],
+    *,
+    max_diagnostics: int,
 ) -> list[str]:
     warnings: list[str] = []
-    for diagnostic in diagnostics[:20]:
+    for diagnostic in diagnostics[:max_diagnostics]:
         warnings.append(f"{member_name}: parse diagnostic: {diagnostic.format()}")
-    if len(diagnostics) > 20:
+    if len(diagnostics) > max_diagnostics:
         warnings.append(
-            f"{member_name}: parse diagnostic: and {len(diagnostics) - 20} more"
+            f"{member_name}: parse diagnostic: and {len(diagnostics) - max_diagnostics} more"
         )
     return warnings
 

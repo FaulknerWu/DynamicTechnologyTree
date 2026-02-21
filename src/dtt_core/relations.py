@@ -1,5 +1,3 @@
-from typing import Dict, Set
-
 from config import DisplayConfig
 from models import Technology
 
@@ -7,8 +5,8 @@ from models import Technology
 class RelationsBuilder:
     def __init__(
         self,
-        all_technologies: Dict[str, Technology],
-        overlong_tech_ids: Set[str],
+        all_technologies: dict[str, Technology],
+        overlong_tech_ids: set[str],
         display_config: DisplayConfig,
     ) -> None:
         self.all_technologies = all_technologies

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import FileIndexConfig
 from dtt_core.source_manifest import (
     Domain,
     FileRef,
@@ -23,9 +24,8 @@ class _IndexedFile:
 
 
 class FileIndexer:
-    _TECH_ROOT = Path("common") / "technology"
-    _LOCALISATION_ROOT = Path("localisation")
-    _LOCALISATION_REPLACE_PREFIX = "localisation/replace"
+    def __init__(self, *, config: FileIndexConfig | None = None) -> None:
+        self._config = config if config is not None else FileIndexConfig()
 
     def index_technology_files(self, manifest: SourceManifest) -> tuple[FileRef, ...]:
         return self._index_domain(manifest, domain="technology")
@@ -83,21 +83,21 @@ class FileIndexer:
     ) -> tuple[tuple[str, Path], ...]:
         root = source.root_path
         if domain == "technology":
-            tech_dir = root / self._TECH_ROOT
+            tech_dir = root / Path(self._config.technology_root)
             if not tech_dir.is_dir():
                 return ()
             return tuple(
                 self._to_relative_ref(root, file_path)
-                for file_path in tech_dir.glob("*.txt")
+                for file_path in tech_dir.glob(self._config.technology_glob)
                 if file_path.is_file()
             )
 
-        loc_dir = root / self._LOCALISATION_ROOT
+        loc_dir = root / Path(self._config.localisation_root)
         if not loc_dir.is_dir():
             return ()
         return tuple(
             self._to_relative_ref(root, file_path)
-            for file_path in loc_dir.rglob("*.yml")
+            for file_path in loc_dir.glob(self._config.localisation_glob)
             if file_path.is_file()
         )
 
@@ -128,7 +128,7 @@ class FileIndexer:
         phase = 0
         if domain == "localisation" and self._is_under_prefix(
             file_ref.relative_path,
-            self._LOCALISATION_REPLACE_PREFIX,
+            self._config.localisation_replace_prefix,
         ):
             phase = 1
 

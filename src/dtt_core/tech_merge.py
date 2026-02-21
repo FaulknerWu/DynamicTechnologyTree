@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
+from collections.abc import Iterable
 
 from dtt_core.clausewitz_parser import Block
 from dtt_core.tech_extractor import TechDefinitionFragment, TechnologySwap

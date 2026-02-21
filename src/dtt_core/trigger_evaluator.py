@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 from dtt_core.clausewitz_parser import Assignment, Atom, Block, ClausewitzNode
 from dtt_core.save_context import SaveContext, SaveEmpireFacts
-
 
 _TRUE_LITERALS = frozenset({"yes", "true", "1", "on"})
 _FALSE_LITERALS = frozenset({"no", "false", "0", "off"})
@@ -74,7 +73,7 @@ class EmpireProfile:
     memberships: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
     @classmethod
-    def auto(cls, polity: str) -> "EmpireProfile":
+    def auto(cls, polity: str) -> EmpireProfile:
         key = polity.strip().casefold()
         if key not in _AUTO_POLITY_CONTEXTS:
             supported = ", ".join(sorted(_AUTO_POLITY_CONTEXTS))
@@ -89,7 +88,7 @@ class EmpireProfile:
         )
 
     @classmethod
-    def auto_contexts(cls) -> dict[str, "EmpireProfile"]:
+    def auto_contexts(cls) -> dict[str, EmpireProfile]:
         return {name: cls.auto(name) for name in _AUTO_POLITY_CONTEXTS}
 
     @classmethod
@@ -99,7 +98,7 @@ class EmpireProfile:
         *,
         name: str = "custom",
         memberships: Mapping[str, str | Iterable[str]] | None = None,
-    ) -> "EmpireProfile":
+    ) -> EmpireProfile:
         normalized: dict[str, bool] = {}
         for raw_key, raw_value in predicates.items():
             key = raw_key.strip().casefold()
@@ -118,7 +117,7 @@ class EmpireProfile:
     @classmethod
     def from_save_empire_facts(
         cls, facts: SaveEmpireFacts, *, name: str | None = None
-    ) -> "EmpireProfile":
+    ) -> EmpireProfile:
         profile_name = name or facts.country_name or f"country_{facts.country_id}"
         return cls(
             mode="save",
@@ -134,7 +133,7 @@ class EmpireProfile:
         *,
         country_id: int | None = None,
         name: str | None = None,
-    ) -> "EmpireProfile":
+    ) -> EmpireProfile:
         facts = context.resolve_empire(country_id=country_id)
         if facts is None:
             requested_country_id = (

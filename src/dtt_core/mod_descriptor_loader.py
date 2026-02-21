@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Sequence
 
+from config import DEFAULT_DECODE_REPLACEMENT_ENCODING, DecodeFailurePolicy
 from dtt_core.clausewitz_parser import (
     Assignment,
     Atom,
@@ -12,7 +14,13 @@ from dtt_core.clausewitz_parser import (
     TokenKind,
     parse,
 )
-from dtt_core.file_decode import DecodeDiagnostics, read_text_with_diagnostics
+from dtt_core.file_decode import (
+    DEFAULT_FAILURE_POLICY,
+    DEFAULT_FALLBACK_ENCODINGS,
+    PREFERRED_ENCODINGS,
+    DecodeDiagnostics,
+    read_text_with_diagnostics,
+)
 
 
 @dataclass(frozen=True)
@@ -26,9 +34,22 @@ class ModDescriptor:
     parse_diagnostics: tuple[Diagnostic, ...] = ()
 
 
-def load_descriptor(path: Path | str) -> ModDescriptor:
+def load_descriptor(
+    path: Path | str,
+    *,
+    preferred_encodings: Sequence[str] = PREFERRED_ENCODINGS,
+    fallback_encodings: Sequence[str] = DEFAULT_FALLBACK_ENCODINGS,
+    replacement_encoding: str = DEFAULT_DECODE_REPLACEMENT_ENCODING,
+    on_failure: DecodeFailurePolicy = DEFAULT_FAILURE_POLICY,
+) -> ModDescriptor:
     descriptor_path = Path(path)
-    decoded = read_text_with_diagnostics(descriptor_path)
+    decoded = read_text_with_diagnostics(
+        descriptor_path,
+        preferred_encodings=preferred_encodings,
+        fallback_encodings=fallback_encodings,
+        replacement_encoding=replacement_encoding,
+        on_failure=on_failure,
+    )
     parse_result = parse(decoded.text, path=str(descriptor_path))
 
     replace_paths: list[str] = []
@@ -70,8 +91,22 @@ def load_descriptor(path: Path | str) -> ModDescriptor:
 
 
 class ModDescriptorLoader:
-    def load_descriptor(self, path: Path | str) -> ModDescriptor:
-        return load_descriptor(path)
+    def load_descriptor(
+        self,
+        path: Path | str,
+        *,
+        preferred_encodings: Sequence[str] = PREFERRED_ENCODINGS,
+        fallback_encodings: Sequence[str] = DEFAULT_FALLBACK_ENCODINGS,
+        replacement_encoding: str = DEFAULT_DECODE_REPLACEMENT_ENCODING,
+        on_failure: DecodeFailurePolicy = DEFAULT_FAILURE_POLICY,
+    ) -> ModDescriptor:
+        return load_descriptor(
+            path,
+            preferred_encodings=preferred_encodings,
+            fallback_encodings=fallback_encodings,
+            replacement_encoding=replacement_encoding,
+            on_failure=on_failure,
+        )
 
 
 def _atom_text(node: ClausewitzNode) -> str | None:
