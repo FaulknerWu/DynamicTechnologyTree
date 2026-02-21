@@ -10,23 +10,39 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 keywords = ["stellaris", "mod", "technology", "tree"]
-dependencies = ["PyQt6"]
+dependencies = ["PyQt6", "pydantic>=2,<3"]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov"]
+dev = ["black", "pytest", "pytest-cov", "ruff"]
 
 [project.gui-scripts]
 dtt-gui = "gui:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["config", "generator", "localization", "models"]
+py-modules = ["config", "generator", "localization", "models", "settings", "settings_reference", "settings_store"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"gui.fonts" = ["*.otf"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+extend-exclude = '/(build|dist|src/dynamic_technology_tree\.egg-info)/'
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+extend-exclude = ["build", "dist", "src/dynamic_technology_tree.egg-info"]
+
+[tool.ruff.lint]
+extend-select = ["I"]
