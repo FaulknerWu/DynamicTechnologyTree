@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -19,19 +19,19 @@ from dtt_core.clausewitz_parser import Assignment, Block, parse
 from dtt_core.eligibility import build_allowed_tech_ids_for_empire
 from dtt_core.output import OutputWriter
 from dtt_core.render import TreeRenderer
+from dtt_core.settings_snapshot import generator_config_from_settings
 from dtt_core.tech_merge import MergedTechDefinition
 from dtt_core.trigger_evaluator import EmpireProfile
 from models import Technology
+from settings import Settings
 
 
 def _parse_potential_block(block_body: str) -> Block:
-    parsed = parse(
-        f"""
+    parsed = parse(f"""
 potential = {{
 {block_body}
 }}
-"""
-    )
+""")
     assert parsed.diagnostics == []
     assignments = [item for item in parsed.root.items if isinstance(item, Assignment)]
     assert len(assignments) == 1
@@ -129,6 +129,20 @@ def _build_config() -> GeneratorConfig:
         ),
         tech=TechConfig(),
     )
+
+
+def _build_settings_config(
+    *,
+    eligibility_sample_size: int,
+    eligibility_unknown_warning_threshold: int = 1,
+) -> GeneratorConfig:
+    settings = Settings()
+    settings.localization.language = "english"
+    settings.output.eligibility_sample_size = eligibility_sample_size
+    settings.output.eligibility_unknown_warning_threshold = (
+        eligibility_unknown_warning_threshold
+    )
+    return generator_config_from_settings(settings)
 
 
 def test_filtered_tree_module_file_is_removed() -> None:
@@ -235,7 +249,8 @@ def test_output_writer_emits_single_context_keys_and_save_report(
     )
 
     monkeypatch.chdir(tmp_path)
-    report = writer.generate_all_yml_files()
+    write_result = writer.generate_all_yml_files()
+    report = write_result.eligibility_report
 
     assert "tech_machine_only" in report.excluded_by_false
     assert "tech_unknown_gate" in report.excluded_by_unknown
@@ -272,3 +287,84 @@ def test_output_writer_emits_single_context_keys_and_save_report(
     assert "unknown_predicate_frequency_top:" in save_report_text
     assert "future_polity_gate" in save_report_text
     assert "swap_ambiguities:" in save_report_text
+
+
+def test_output_writer_eligibility_custom_sample_changes_report_content_deterministically(
+    tmp_path: Path,
+) -> None:
+    root = Technology("tech_root", research_area="physics", tier_level=1)
+    unknown_ids = ["tech_unknown_a", "tech_unknown_b", "tech_unknown_c"]
+    techs = {root.tech_id: root}
+    descriptions = {"tech_root": {"english": "Root description."}}
+
+    merged: dict[str, MergedTechDefinition] = {}
+    for tech_id in unknown_ids:
+        techs[tech_id] = Technology(
+            tech_id,
+            research_area="society",
+            tier_level=2,
+            prerequisite_tech_ids=["tech_root"],
+        )
+        descriptions[tech_id] = {"english": f"{tech_id} description."}
+        merged[tech_id] = MergedTechDefinition(
+            tech_id=tech_id,
+            potential=_parse_potential_block("future_polity_gate = yes"),
+        )
+    root.unlocked_tech_ids = list(unknown_ids)
+
+    renderer = TreeRenderer(
+        all_technologies=techs,
+        display_config=DisplayConfig(
+            max_children_per_node=12,
+            max_tree_depth=5,
+            max_display_nodes=128,
+        ),
+    )
+
+    sample_one_config = _build_settings_config(eligibility_sample_size=1)
+    sample_two_config = _build_settings_config(eligibility_sample_size=2)
+    assert sample_one_config.output.eligibility_sample_size == 1
+    assert sample_two_config.output.eligibility_sample_size == 2
+
+    writer_sample_one = OutputWriter(
+        all_technologies=techs,
+        tech_descriptions=descriptions,
+        config=sample_one_config,
+        localize=lambda key, **kwargs: key,
+        generate_tech_tree_content=renderer.generate_tech_tree_content,
+        merged_tech_definitions=merged,
+        application_root=tmp_path / "sample-one",
+    )
+    writer_sample_two = OutputWriter(
+        all_technologies=techs,
+        tech_descriptions=descriptions,
+        config=sample_two_config,
+        localize=lambda key, **kwargs: key,
+        generate_tech_tree_content=renderer.generate_tech_tree_content,
+        merged_tech_definitions=merged,
+        application_root=tmp_path / "sample-two",
+    )
+
+    writer_sample_one.generate_all_yml_files()
+    writer_sample_two.generate_all_yml_files()
+
+    report_one = tmp_path / "sample-one" / "localisation" / "dtt-save-report.txt"
+    report_two = tmp_path / "sample-two" / "localisation" / "dtt-save-report.txt"
+
+    line_one = next(
+        line
+        for line in report_one.read_text(encoding="utf-8").splitlines()
+        if line.startswith("- future_polity_gate:")
+    )
+    line_two = next(
+        line
+        for line in report_two.read_text(encoding="utf-8").splitlines()
+        if line.startswith("- future_polity_gate:")
+    )
+
+    assert line_one == "- future_polity_gate: count=3; examples=tech_unknown_a"
+    assert (
+        line_two
+        == "- future_polity_gate: count=3; examples=tech_unknown_a, tech_unknown_b"
+    )
+    assert line_one != line_two

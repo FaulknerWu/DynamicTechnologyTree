@@ -6,13 +6,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtGui import QFontDatabase  # noqa: E402
-from PyQt6.QtWidgets import QApplication  # noqa: E402
-
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT_DIR / "src"
@@ -23,16 +19,19 @@ REQUIRED_HIDDENIMPORTS = {
     "config",
     "generator",
     "gui",
-    "gui.config_editor",
     "gui.fonts",
     "gui.generation_worker",
     "gui.i18n",
     "gui.main_window",
     "gui.path_detector",
+    "gui.settings_json_editor",
+    "gui.settings_panel",
+    "gui.settings_renderer",
     "gui.title_bar",
     "localization",
     "models",
-    "dtt_core.config_loader",
+    "settings",
+    "settings_store",
     "dtt_core.cycle",
     "dtt_core.eligibility",
     "dtt_core.events",
@@ -40,14 +39,18 @@ REQUIRED_HIDDENIMPORTS = {
     "dtt_core.generate_localization",
     "dtt_core.ingestion_pipeline",
     "dtt_core.output",
+    "dtt_core.prepared_run",
     "dtt_core.relations",
     "dtt_core.render",
+    "dtt_core.run_outcome",
     "dtt_core.sav_reader",
     "dtt_core.save_context",
+    "dtt_core.settings_snapshot",
     "dtt_core.stats",
     "dtt_core.stdout_event_sink",
     "dtt_core.swap_resolver",
     "dtt_core.tech_merge",
+    "dtt_core.typed_error",
     "dtt_core.trigger_evaluator",
 }
 
@@ -55,14 +58,15 @@ REQUIRED_HIDDENIMPORTS = {
 IMPORT_SMOKE_MODULES = (
     "gui.__main__",
     "generator",
-    "dtt_core.config_loader",
     "dtt_core.events",
     "dtt_core.generate_localization",
     "dtt_core.ingestion_pipeline",
     "dtt_core.output",
+    "dtt_core.run_outcome",
     "dtt_core.render",
     "dtt_core.sav_reader",
     "dtt_core.save_context",
+    "gui.settings_panel",
 )
 
 
@@ -89,18 +93,6 @@ def _analysis_hiddenimports(spec_source: str) -> set[str]:
                     imports.add(item.value)
                 return imports
     raise AssertionError("Analysis(..., hiddenimports=[...]) not found in spec")
-
-
-@pytest.fixture(scope="session")
-def qt_app() -> Any:
-    app: Any = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    try:
-        app.setQuitOnLastWindowClosed(False)
-    except Exception:
-        pass
-    return app
 
 
 def test_pyinstaller_spec_keeps_gui_entry_and_font_bundle() -> None:

@@ -11,7 +11,6 @@ from dtt_core.trigger_evaluator import (
     TriggerEvaluator,
 )
 
-
 _MEMBERSHIP_CASES = (
     (
         "has_origin",
@@ -42,13 +41,11 @@ def test_membership_cases_cover_supported_predicates() -> None:
 
 
 def _parse_potential_block(block_body: str) -> Block:
-    parsed = parse(
-        f"""
+    parsed = parse(f"""
 potential = {{
 {block_body}
 }}
-"""
-    )
+""")
     assert parsed.diagnostics == []
 
     assignments = [item for item in parsed.root.items if isinstance(item, Assignment)]
@@ -116,13 +113,11 @@ def test_unknown_predicates_differ_between_auto_and_profile_modes() -> None:
 
 def test_not_propagates_unknown() -> None:
     evaluator = TriggerEvaluator()
-    potential = _parse_potential_block(
-        """
+    potential = _parse_potential_block("""
 NOT = {
   unknown_gate = yes
 }
-"""
-    )
+""")
 
     result = evaluator.evaluate_potential(potential, EmpireProfile.auto("regular"))
 
@@ -134,13 +129,11 @@ NOT = {
 
 def test_nor_propagates_unknown() -> None:
     evaluator = TriggerEvaluator()
-    potential = _parse_potential_block(
-        """
+    potential = _parse_potential_block("""
 NOR = {
   unknown_gate = yes
 }
-"""
-    )
+""")
 
     result = evaluator.evaluate_potential(potential, EmpireProfile.auto("regular"))
 
@@ -201,13 +194,11 @@ def test_membership_predicates_require_atom_values(
 ) -> None:
     evaluator = TriggerEvaluator()
     result = evaluator.evaluate_potential(
-        _parse_potential_block(
-            f"""
+        _parse_potential_block(f"""
 {predicate} = {{
   always = yes
 }}
-"""
-        ),
+"""),
         EmpireProfile.profile(
             {},
             name="save_like_profile",

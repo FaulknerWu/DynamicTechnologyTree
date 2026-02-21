@@ -2,89 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import sqlite3
 import zipfile
+from pathlib import Path
 
-import pytest
-
+from conftest import _build_settings, _create_minimal_launcher_db
 from generator import TechTreeGenerator
-
-
-def _write_config(
-    path: Path,
-    *,
-    base_game: Path,
-    workshop: Path,
-    launcher_db: Path,
-    priority_mods: str | None = None,
-) -> None:
-    priority_line = (
-        f"priority_mods = {priority_mods}\n" if priority_mods is not None else ""
-    )
-    path.write_text(
-        """
-[paths]
-base_game_path = {base}
-mod_folder_path = {workshop}
-local_mod_folder_path =
-launcher_db_path = {launcher_db}
-
-[localization]
-language = english
-{priority_line}
-
-""".strip().format(
-            base=base_game,
-            workshop=workshop,
-            launcher_db=launcher_db,
-            priority_line=priority_line,
-        ),
-        encoding="utf-8",
-    )
-
-
-def _create_minimal_launcher_db(path: Path) -> None:
-    with sqlite3.connect(path) as conn:
-        conn.executescript(
-            """
-            CREATE TABLE playsets (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                isActive INTEGER,
-                isRemoved INTEGER,
-                createdOn TEXT
-            );
-
-            CREATE TABLE playsets_mods (
-                playsetId TEXT,
-                modId TEXT,
-                enabled INTEGER,
-                position TEXT
-            );
-
-            CREATE TABLE mods (
-                id TEXT PRIMARY KEY,
-                dirPath TEXT,
-                gameRegistryId TEXT,
-                steamId TEXT,
-                pdxId TEXT
-            );
-
-            CREATE TABLE knex_migrations (
-                id INTEGER PRIMARY KEY,
-                name TEXT
-            );
-            """
-        )
-        conn.execute(
-            "INSERT INTO knex_migrations (id, name) VALUES (?, ?)",
-            (1, "20250101000000_initial"),
-        )
-        conn.execute(
-            "INSERT INTO playsets (id, name, isActive, isRemoved, createdOn) VALUES (?, ?, ?, ?, ?)",
-            ("ps-vanilla", "Vanilla", 1, 0, "2026-01-01T00:00:00Z"),
-        )
 
 
 def _assert_identical_outputs(paths: list[Path], golden_path: Path) -> None:
@@ -184,11 +106,9 @@ def test_generator_golden_output(tmp_path: Path, monkeypatch) -> None:
     assert base_game.is_dir()
     assert workshop.is_dir()
 
-    cfg = tmp_path / "config.ini"
     launcher_db = tmp_path / "launcher-v2.sqlite"
     _create_minimal_launcher_db(launcher_db)
-    _write_config(
-        cfg,
+    settings = _build_settings(
         base_game=base_game,
         workshop=workshop,
         launcher_db=launcher_db,
@@ -196,7 +116,7 @@ def test_generator_golden_output(tmp_path: Path, monkeypatch) -> None:
     save_path = _write_synthetic_regular_save(tmp_path / "golden.sav")
 
     monkeypatch.chdir(tmp_path)
-    gen = TechTreeGenerator(str(cfg))
+    gen = TechTreeGenerator.from_settings(settings)
     gen.run_generation_process(save_path=save_path)
 
     lang_code = "english"
@@ -216,33 +136,6 @@ def test_generator_golden_output(tmp_path: Path, monkeypatch) -> None:
     )
 
 
-@pytest.mark.parametrize("priority_mods_value", ["", "12345,67890"])
-def test_priority_mods_is_rejected_when_present(
-    tmp_path: Path,
-    priority_mods_value: str,
-) -> None:
-    fixture_root = Path(__file__).parent / "fixtures"
-    base_game = fixture_root / "stellaris"
-    workshop = fixture_root / "workshop"
-
-    cfg_priority = tmp_path / "config.ini"
-    launcher_db_priority = tmp_path / "launcher-v2.sqlite"
-    _create_minimal_launcher_db(launcher_db_priority)
-    _write_config(
-        cfg_priority,
-        base_game=base_game,
-        workshop=workshop,
-        launcher_db=launcher_db_priority,
-        priority_mods=priority_mods_value,
-    )
-
-    with pytest.raises(
-        ValueError,
-        match=r"\[localization\] priority_mods has been removed; delete this key from config\.ini",
-    ):
-        TechTreeGenerator(str(cfg_priority))
-
-
 def test_output_determinism_across_run_roots(tmp_path: Path, monkeypatch) -> None:
     fixture_root = Path(__file__).parent / "fixtures"
     base_game = fixture_root / "stellaris"
@@ -254,11 +147,9 @@ def test_output_determinism_across_run_roots(tmp_path: Path, monkeypatch) -> Non
 
     run_a = tmp_path / "run_a"
     run_a.mkdir(parents=True)
-    cfg_a = run_a / "config.ini"
     launcher_db_a = run_a / "launcher-v2.sqlite"
     _create_minimal_launcher_db(launcher_db_a)
-    _write_config(
-        cfg_a,
+    settings_a = _build_settings(
         base_game=base_game,
         workshop=workshop,
         launcher_db=launcher_db_a,
@@ -266,7 +157,7 @@ def test_output_determinism_across_run_roots(tmp_path: Path, monkeypatch) -> Non
     save_a = _write_synthetic_regular_save(run_a / "run-a.sav")
 
     monkeypatch.chdir(run_a)
-    gen_a = TechTreeGenerator(str(cfg_a))
+    gen_a = TechTreeGenerator.from_settings(settings_a)
     gen_a.run_generation_process(save_path=save_a)
     run_a_bytes = _capture_determinism_bytes(
         run_a,
@@ -276,11 +167,9 @@ def test_output_determinism_across_run_roots(tmp_path: Path, monkeypatch) -> Non
 
     run_b = tmp_path / "run_b"
     run_b.mkdir(parents=True)
-    cfg_b = run_b / "config.ini"
     launcher_db_b = run_b / "launcher-v2.sqlite"
     _create_minimal_launcher_db(launcher_db_b)
-    _write_config(
-        cfg_b,
+    settings_b = _build_settings(
         base_game=base_game,
         workshop=workshop,
         launcher_db=launcher_db_b,
@@ -288,7 +177,7 @@ def test_output_determinism_across_run_roots(tmp_path: Path, monkeypatch) -> Non
     save_b = _write_synthetic_regular_save(run_b / "run-b.sav")
 
     monkeypatch.chdir(run_b)
-    gen_b = TechTreeGenerator(str(cfg_b))
+    gen_b = TechTreeGenerator.from_settings(settings_b)
     gen_b.run_generation_process(save_path=save_b)
     run_b_bytes = _capture_determinism_bytes(
         run_b,

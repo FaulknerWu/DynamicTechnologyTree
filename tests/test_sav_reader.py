@@ -3,35 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-import zipfile
 
 import pytest
 
+from conftest import _write_sav
 import dtt_core.sav_reader as sav_reader
+from dtt_core.clausewitz_parser import Diagnostic
 from dtt_core.save_context import SaveParseReport
-
-
-def _payload_bytes(payload: str | bytes) -> bytes:
-    if isinstance(payload, bytes):
-        return payload
-    return payload.encode("utf-8")
-
-
-def _write_sav(
-    path: Path,
-    *,
-    meta: str | bytes | None,
-    gamestate: str | bytes | None,
-    extras: dict[str, str | bytes] | None = None,
-) -> Path:
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        if meta is not None:
-            archive.writestr("meta", _payload_bytes(meta))
-        if gamestate is not None:
-            archive.writestr("gamestate", _payload_bytes(gamestate))
-        for name, payload in (extras or {}).items():
-            archive.writestr(name, _payload_bytes(payload))
-    return path
 
 
 def test_load_save_context_valid_zip_extracts_deterministic_context(
@@ -77,7 +55,7 @@ def test_load_save_context_valid_zip_extracts_deterministic_context(
 
     assert context.save_name == "Campaign 01"
     assert context.player_country_candidates == (7, 42)
-    assert context.player_country_id == 7
+    assert context.player_country_id is None
     assert context.sorted_country_ids() == (7, 42)
     assert tuple(context.empires_by_country_id) == (7, 42)
     assert context.dlcs == frozenset({"Utopia", "Leviathans", "Galactic Paragons"})
@@ -107,6 +85,9 @@ def test_load_save_context_valid_zip_extracts_deterministic_context(
     assert any(
         "Multiple player country candidates found" in warning
         for warning in context.report.warnings
+    )
+    assert not any(
+        "using the smallest" in warning for warning in context.report.warnings
     )
 
 
@@ -160,11 +141,13 @@ def test_load_save_context_rejects_binary_or_ironman_payload(tmp_path: Path) -> 
     assert "Binary or ironman saves are not supported" in str(exc.value)
 
 
-def test_load_save_context_rejects_member_larger_than_safety_cap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_sav_reader_caps_rejects_member_larger_than_safety_cap(
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(sav_reader, "MAX_MEMBER_UNCOMPRESSED_SIZE", 48)
-    monkeypatch.setattr(sav_reader, "MAX_TOTAL_UNCOMPRESSED_SIZE", 2048)
+    limits = sav_reader.SaveReaderLimits(
+        max_member_uncompressed_size_bytes=48,
+        max_total_uncompressed_size_bytes=2048,
+    )
 
     oversized_meta = 'name = "x"\npadding = "' + ("a" * 128) + '"\n'
     save_path = _write_sav(
@@ -174,23 +157,21 @@ def test_load_save_context_rejects_member_larger_than_safety_cap(
     )
 
     with pytest.raises(sav_reader.SaveReaderError) as exc:
-        sav_reader.load_save_context(save_path)
+        sav_reader.load_save_context(save_path, limits=limits)
 
     assert "safe per-member limit" in str(exc.value)
 
 
-def test_load_save_context_rejects_total_uncompressed_size_larger_than_cap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_sav_reader_caps_rejects_total_uncompressed_size_larger_than_cap(
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(sav_reader, "MAX_MEMBER_UNCOMPRESSED_SIZE", 4096)
-    monkeypatch.setattr(sav_reader, "MAX_TOTAL_UNCOMPRESSED_SIZE", 96)
-
-    meta = 'name = "Too Large"\npad = "' + ("b" * 80) + '"\n'
-    gamestate = (
-        "player = { 0 = { country = 1 } }\n"
-        'country = { 1 = { name = "A" } }\n'
-        'trail = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"\n'
+    limits = sav_reader.SaveReaderLimits(
+        max_member_uncompressed_size_bytes=128,
+        max_total_uncompressed_size_bytes=128,
     )
+
+    meta = "m" * 80
+    gamestate = "g" * 80
     save_path = _write_sav(
         tmp_path / "oversized-total.sav",
         meta=meta,
@@ -198,9 +179,56 @@ def test_load_save_context_rejects_total_uncompressed_size_larger_than_cap(
     )
 
     with pytest.raises(sav_reader.SaveReaderError) as exc:
-        sav_reader.load_save_context(save_path)
+        sav_reader.load_save_context(save_path, limits=limits)
 
     assert "safe total limit" in str(exc.value)
+
+
+def test_sav_reader_custom_caps_lenient_passes_strict_fails(tmp_path: Path) -> None:
+    meta = 'name = "Caps"\npad = "' + ("a" * 200) + '"\n'
+    gamestate = "player = {}\n"
+    save_path = _write_sav(
+        tmp_path / "custom-caps.sav",
+        meta=meta,
+        gamestate=gamestate,
+    )
+
+    lenient_limits = sav_reader.SaveReaderLimits(
+        max_member_uncompressed_size_bytes=4096,
+        max_total_uncompressed_size_bytes=4096,
+    )
+    strict_limits = sav_reader.SaveReaderLimits(
+        max_member_uncompressed_size_bytes=64,
+        max_total_uncompressed_size_bytes=4096,
+    )
+
+    context = sav_reader.load_save_context(save_path, limits=lenient_limits)
+    assert context.save_name == "Caps"
+
+    with pytest.raises(sav_reader.SaveReaderError) as exc:
+        sav_reader.load_save_context(save_path, limits=strict_limits)
+
+    message = str(exc.value)
+    assert "safe per-member limit" in message
+    assert "(64 bytes)" in message
+
+
+def test_sav_reader_caps_format_parse_warnings_truncates_to_limit() -> None:
+    diagnostics = [
+        Diagnostic(message=f"diag {i}", line=1, col=i + 1, path="test")
+        for i in range(30)
+    ]
+
+    warnings = sav_reader._format_parse_warnings(
+        "meta",
+        diagnostics,
+        max_diagnostics=5,
+    )
+
+    assert len(warnings) == 6
+    assert "diag 0" in warnings[0]
+    assert "diag 4" in warnings[4]
+    assert "and 25 more" in warnings[-1]
 
 
 def test_load_save_context_report_records_fallback_encoding_and_warning(

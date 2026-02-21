@@ -4,54 +4,27 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
+from PyQt6.QtWidgets import QFileDialog, QInputDialog
 
 import gui.generation_worker as generation_worker_module
 import gui.main_window as main_window_module
+from dtt_core.prepared_run import AmbiguousPlayerEmpireError
 from dtt_core.save_context import SaveContext, SaveEmpireFacts
 from gui.main_window import MainWindow
+from gui.settings_renderer import PathFieldWidget
 
 
-@pytest.fixture(scope="session")
-def qt_app() -> Any:
-    app: Any = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    try:
-        app.setQuitOnLastWindowClosed(False)
-    except Exception:
-        pass
-    return app
-
-
-@pytest.fixture()
-def message_boxes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> dict[str, list[tuple[tuple[Any, ...], dict[str, Any]]]]:
-    calls: dict[str, list[tuple[tuple[Any, ...], dict[str, Any]]]] = {
-        "warning": [],
-        "critical": [],
-        "information": [],
-    }
-
-    def _stub(kind: str) -> Callable[..., Any]:
-        def _impl(*args: Any, **kwargs: Any) -> Any:
-            calls[kind].append((args, kwargs))
-            return QMessageBox.StandardButton.Ok
-
-        return _impl
-
-    monkeypatch.setattr(QMessageBox, "warning", _stub("warning"))
-    monkeypatch.setattr(QMessageBox, "critical", _stub("critical"))
-    monkeypatch.setattr(QMessageBox, "information", _stub("information"))
-    return calls
-
+def _path_widget(window: MainWindow, field: str) -> PathFieldWidget:
+    return cast(
+        PathFieldWidget,
+        window.settings_panel.settings_renderer.widget_for(f"paths.{field}"),
+    )
 
 def _configure_required_paths(window: MainWindow, tmp_path: Path) -> None:
     base_game_dir = tmp_path / "game"
@@ -60,14 +33,14 @@ def _configure_required_paths(window: MainWindow, tmp_path: Path) -> None:
     base_game_dir.mkdir(exist_ok=True)
     workshop_dir.mkdir(exist_ok=True)
     launcher_db.write_text("", encoding="utf-8")
-    window.config_editor.base_game_path_input.setText(str(base_game_dir))
-    window.config_editor.mod_folder_path_input.setText(str(workshop_dir))
-    window.config_editor.launcher_db_path_input.setText(str(launcher_db))
+    _path_widget(window, "base_game_path").setText(str(base_game_dir))
+    _path_widget(window, "mod_folder_path").setText(str(workshop_dir))
+    _path_widget(window, "launcher_db_path").setText(str(launcher_db))
 
 
 def _make_window(tmp_path: Path, qt_app: Any) -> MainWindow:
-    cfg_path = tmp_path / "config.ini"
-    window = MainWindow(config_path=cfg_path)
+    settings_path = tmp_path / "settings.json"
+    window = MainWindow(config_path=settings_path)
     window.show()
     qt_app.processEvents()
     _configure_required_paths(window, tmp_path)
@@ -105,7 +78,7 @@ def test_generate_prompts_for_save_on_every_run(
     created_workers: list[Any] = []
 
     class DummyWorker:
-        def __init__(self, _config_path: str) -> None:
+        def __init__(self, _settings: Any) -> None:
             self.log_message = _Signal()
             self.progress = _Signal()
             self.finished = _Signal()
@@ -156,7 +129,7 @@ def test_generate_prompts_for_save_on_every_run(
         qt_app.processEvents()
 
 
-def test_generate_cancelled_save_dialog_does_not_start_worker(
+def test_gui_save_prompt_cancel_country_does_not_start_worker(
     tmp_path: Path,
     qt_app: Any,
     message_boxes,
@@ -165,7 +138,7 @@ def test_generate_cancelled_save_dialog_does_not_start_worker(
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_a, **_k: ("", ""))
 
     class UnexpectedWorker:
-        def __init__(self, _config_path: str) -> None:
+        def __init__(self, _settings: Any) -> None:
             raise AssertionError(
                 "worker should not be created when save selection is cancelled"
             )
@@ -181,6 +154,126 @@ def test_generate_cancelled_save_dialog_does_not_start_worker(
         assert window.generate_button.isEnabled()
         assert window.save_button.isEnabled()
         assert not message_boxes["critical"]
+    finally:
+        window.close()
+        window.deleteLater()
+        qt_app.processEvents()
+
+
+def test_gui_generation_finished_error_reenables_controls_and_shows_critical(
+    tmp_path: Path,
+    qt_app: Any,
+    message_boxes,
+) -> None:
+    class DummyWorker:
+        def __init__(self) -> None:
+            self.wait_calls = 0
+            self.delete_later_calls = 0
+            self._running = False
+
+        def isRunning(self) -> bool:
+            return self._running
+
+        def cancel(self) -> None:
+            self._running = False
+
+        def wait(self, *_args: Any, **_kwargs: Any) -> bool:
+            self.wait_calls += 1
+            return True
+
+        def deleteLater(self) -> None:
+            self.delete_later_calls += 1
+
+    window = _make_window(tmp_path, qt_app)
+    worker = DummyWorker()
+    try:
+        window._set_generation_controls(True)
+        window.progress_bar.setValue(37)
+        message_boxes["critical"].clear()
+        window.worker = cast(Any, worker)
+
+        window.on_generation_finished(
+            generation_worker_module.GenerationOutcome(
+                code=generation_worker_module.GenerationOutcomeCode.ERROR,
+                message="boom",
+            )
+        )
+        qt_app.processEvents()
+
+        assert window.generate_button.isEnabled()
+        assert window.save_button.isEnabled()
+        assert window.settings_profile_combo.isEnabled()
+        assert window.progress_bar.value() == 37
+        assert window.worker is None
+        assert worker.wait_calls == 1
+        assert worker.delete_later_calls == 1
+
+        assert len(message_boxes["critical"]) == 1
+        critical_args, critical_kwargs = message_boxes["critical"][0]
+        assert critical_kwargs == {}
+        assert critical_args[0] is window
+        assert critical_args[1] == window._t("ui_msgbox_title_error")
+        assert "boom" in critical_args[2]
+    finally:
+        window.close()
+        window.deleteLater()
+        qt_app.processEvents()
+
+
+def test_gui_generation_finished_cancelled_reenables_controls_and_shows_info(
+    tmp_path: Path,
+    qt_app: Any,
+    message_boxes,
+) -> None:
+    class DummyWorker:
+        def __init__(self) -> None:
+            self.wait_calls = 0
+            self.delete_later_calls = 0
+            self._running = False
+
+        def isRunning(self) -> bool:
+            return self._running
+
+        def cancel(self) -> None:
+            self._running = False
+
+        def wait(self, *_args: Any, **_kwargs: Any) -> bool:
+            self.wait_calls += 1
+            return True
+
+        def deleteLater(self) -> None:
+            self.delete_later_calls += 1
+
+    window = _make_window(tmp_path, qt_app)
+    worker = DummyWorker()
+    try:
+        window._set_generation_controls(True)
+        window.progress_bar.setValue(37)
+        message_boxes["information"].clear()
+        window.worker = cast(Any, worker)
+
+        window.on_generation_finished(
+            generation_worker_module.GenerationOutcome(
+                code=generation_worker_module.GenerationOutcomeCode.CANCELLED,
+                message="cancelled",
+            )
+        )
+        qt_app.processEvents()
+
+        assert window.generate_button.isEnabled()
+        assert window.save_button.isEnabled()
+        assert window.settings_profile_combo.isEnabled()
+        assert window.progress_bar.value() == 37
+        assert window.worker is None
+        assert worker.wait_calls == 1
+        assert worker.delete_later_calls == 1
+
+        assert len(message_boxes["information"]) == 1
+        info_args, info_kwargs = message_boxes["information"][0]
+        assert info_kwargs == {}
+        assert info_args[0] is window
+        assert info_args[1] == window._t("ui_msgbox_title_cancelled")
+        assert info_args[2] == window._t("ui_msgbox_body_generation_cancelled")
     finally:
         window.close()
         window.deleteLater()
@@ -214,27 +307,27 @@ def test_ambiguous_save_shows_empire_chooser_and_passes_selected_country_id(
 
     monkeypatch.setattr(QInputDialog, "getItem", _stub_empire_chooser)
 
-    def _inspect_stub(self: Any, inspected_path: str) -> SaveContext:
-        return SaveContext(
-            save_path=inspected_path,
-            player_country_candidates=(7, 42),
-            empires_by_country_id={
-                7: SaveEmpireFacts(country_id=7, country_name="Alpha Union"),
-                42: SaveEmpireFacts(country_id=42, country_name="Beta Directorate"),
-            },
-        )
-
     run_calls: list[tuple[str, int | None]] = []
 
     def _run_stub(self: Any, *, save_path: str, country_id: int | None) -> bool:
         run_calls.append((save_path, country_id))
+        if country_id is None:
+            raise AmbiguousPlayerEmpireError(
+                save_context=SaveContext(
+                    save_path=save_path,
+                    player_country_candidates=(7, 42),
+                    empires_by_country_id={
+                        7: SaveEmpireFacts(country_id=7, country_name="Alpha Union"),
+                        42: SaveEmpireFacts(
+                            country_id=42,
+                            country_name="Beta Directorate",
+                        ),
+                    },
+                ),
+                country_candidates=(7, 42),
+            )
         return True
 
-    monkeypatch.setattr(
-        generation_worker_module.GenerationWorker,
-        "_inspect_save_context",
-        _inspect_stub,
-    )
     monkeypatch.setattr(
         generation_worker_module.GenerationWorker,
         "_run_generator",
@@ -262,7 +355,7 @@ def test_ambiguous_save_shows_empire_chooser_and_passes_selected_country_id(
         qt_app.processEvents()
 
         assert len(chooser_calls) == 1
-        assert run_calls == [(save_path, 42)]
+        assert run_calls == [(save_path, None), (save_path, 42)]
     finally:
         window.close()
         window.deleteLater()

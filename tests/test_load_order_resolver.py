@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -15,8 +15,7 @@ LoadOrderResolutionError = _resolver_module.LoadOrderResolutionError
 def _create_launcher_schema(db_path: Path, *, include_created_on: bool = True) -> None:
     created_on_column = ", createdOn TEXT" if include_created_on else ""
     with sqlite3.connect(db_path) as conn:
-        conn.executescript(
-            f"""
+        conn.executescript(f"""
             CREATE TABLE playsets (
                 id TEXT PRIMARY KEY,
                 name TEXT,
@@ -43,8 +42,7 @@ def _create_launcher_schema(db_path: Path, *, include_created_on: bool = True) -
                 id INTEGER PRIMARY KEY,
                 name TEXT
             );
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO knex_migrations (id, name) VALUES (?, ?)",
             (1, "20250101000000_initial"),
@@ -130,6 +128,48 @@ def test_resolver_uses_lexicographic_name_when_created_on_column_missing(
     assert any("Multiple active playsets" in warning for warning in result.warnings)
 
 
+def test_load_order_custom_policy_name_then_id_overrides_created_on(
+    tmp_path: Path,
+) -> None:
+    launcher_db = tmp_path / "launcher-v2.sqlite"
+    _create_launcher_schema(launcher_db)
+
+    with sqlite3.connect(launcher_db) as conn:
+        conn.executemany(
+            "INSERT INTO playsets (id, name, isActive, isRemoved, createdOn) VALUES (?, ?, ?, ?, ?)",
+            [
+                ("ps-alpha", "Alpha", 1, 0, "2025-01-01T00:00:00Z"),
+                ("ps-zulu", "Zulu", 1, 0, "2026-01-01T00:00:00Z"),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO mods (id, dirPath, gameRegistryId, steamId, pdxId) VALUES (?, ?, ?, ?, ?)",
+            [
+                ("mod-alpha", "mod/alpha", "registry_alpha", "", ""),
+                ("mod-zulu", "mod/zulu", "registry_zulu", "", ""),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO playsets_mods (playsetId, modId, enabled, position) VALUES (?, ?, ?, ?)",
+            [
+                ("ps-alpha", "mod-alpha", 1, "1"),
+                ("ps-zulu", "mod-zulu", 1, "1"),
+            ],
+        )
+
+    resolver = LoadOrderResolver()
+    with pytest.warns(RuntimeWarning, match="Multiple active playsets"):
+        latest = resolver.resolve_enabled_mods(launcher_db)
+    with pytest.warns(RuntimeWarning, match="Multiple active playsets"):
+        by_name = resolver.resolve_enabled_mods(
+            launcher_db,
+            multi_active_playset_selection_policy="name_then_id",
+        )
+
+    assert [entry.mod_id for entry in latest.entries] == ["mod-zulu"]
+    assert [entry.mod_id for entry in by_name.entries] == ["mod-alpha"]
+
+
 def test_resolver_returns_enabled_mods_sorted_by_position(tmp_path: Path) -> None:
     launcher_db = tmp_path / "launcher-v2.sqlite"
     _create_launcher_schema(launcher_db)
@@ -177,7 +217,8 @@ def test_resolver_fails_fast_when_db_missing(tmp_path: Path) -> None:
         resolver.resolve_enabled_mods(launcher_db)
 
     assert exc.value.code == "missing_database"
-    assert "launcher_db_path" in str(exc.value)
+    details = dict(exc.value.details)
+    assert details.get("path") == str(launcher_db)
 
 
 def test_resolver_fails_fast_when_db_corrupt(tmp_path: Path) -> None:
@@ -189,7 +230,9 @@ def test_resolver_fails_fast_when_db_corrupt(tmp_path: Path) -> None:
         resolver.resolve_enabled_mods(launcher_db)
 
     assert exc.value.code == "corrupt_database"
-    assert "launcher-v2.sqlite" in str(exc.value)
+    details = dict(exc.value.details)
+    assert details.get("path") == str(launcher_db)
+    assert details.get("reason")
 
 
 def test_resolver_fails_fast_when_db_locked(
@@ -209,4 +252,6 @@ def test_resolver_fails_fast_when_db_locked(
         resolver.resolve_enabled_mods(launcher_db)
 
     assert exc.value.code == "database_locked"
-    assert "Close Paradox Launcher" in str(exc.value)
+    details = dict(exc.value.details)
+    assert details.get("path") == str(launcher_db)
+    assert details.get("reason")

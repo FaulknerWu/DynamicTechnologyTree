@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import os
-import sqlite3
 import subprocess
 import sys
+import types
 from dataclasses import FrozenInstanceError
+from itertools import pairwise
 from pathlib import Path
-import zipfile
 
 import pytest
 
+import dtt_core.generate_localization as generate_localization_module
+from conftest import _build_settings, _create_minimal_launcher_db, _write_sav
 from dtt_core.events import (
     EventKind,
     EventSink,
@@ -19,8 +21,10 @@ from dtt_core.events import (
     NullEventSink,
     StageId,
 )
+from dtt_core.generate_localization import GenerateLocalizationUseCase, GenerationSteps
 from dtt_core.stdout_event_sink import StdoutEventSink
 from generator import TechTreeGenerator
+from settings import Settings
 
 
 class RecordingEventSink:
@@ -31,82 +35,183 @@ class RecordingEventSink:
         self.events.append(event)
 
 
-def _create_minimal_launcher_db(path: Path) -> None:
-    with sqlite3.connect(path) as conn:
-        conn.executescript(
-            """
-            CREATE TABLE playsets (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                isActive INTEGER,
-                isRemoved INTEGER,
-                createdOn TEXT
-            );
-
-            CREATE TABLE playsets_mods (
-                playsetId TEXT,
-                modId TEXT,
-                enabled INTEGER,
-                position TEXT
-            );
-
-            CREATE TABLE mods (
-                id TEXT PRIMARY KEY,
-                dirPath TEXT,
-                gameRegistryId TEXT,
-                steamId TEXT,
-                pdxId TEXT
-            );
-            """
-        )
-        conn.execute(
-            "INSERT INTO playsets (id, name, isActive, isRemoved, createdOn) VALUES (?, ?, ?, ?, ?)",
-            ("ps-vanilla", "Vanilla", 1, 0, "2026-01-01T00:00:00Z"),
-        )
-
-
-def _write_config(
-    path: Path, *, base_game: Path, workshop: Path, launcher_db: Path
-) -> None:
-    path.write_text(
-        """
-[paths]
-base_game_path = {base}
-mod_folder_path = {workshop}
-local_mod_folder_path =
-launcher_db_path = {launcher_db}
-
-[localization]
-language = english
-""".strip().format(
-            base=base_game,
-            workshop=workshop,
-            launcher_db=launcher_db,
+def _build_generate_localization_use_case(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[GenerateLocalizationUseCase, RecordingEventSink, list[str]]:
+    monkeypatch.setattr(
+        generate_localization_module,
+        "prepare_run",
+        lambda _save_path, *, country_id=None, save_reader_limits=None: types.SimpleNamespace(
+            save_context=object(),
+            country_candidates=(7,),
+            selected_country_id=country_id or 7,
         ),
-        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        generate_localization_module.EmpireProfile,
+        "from_save_context",
+        staticmethod(lambda _context, country_id=None: object()),
     )
 
+    step_calls: list[str] = []
 
-def _write_save(path: Path) -> Path:
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("meta", b'name = "Event Sink Save"\n')
-        archive.writestr(
-            "gamestate",
-            "\n".join(
-                [
-                    "player = {",
-                    "  0 = { country = 7 }",
-                    "}",
-                    "country = {",
-                    "  7 = {",
-                    '    name = "Event Sink Empire"',
-                    "    authority = auth_democratic",
-                    "  }",
-                    "}",
-                ]
-            ).encode("utf-8"),
-        )
-    return path
+    def _record(name: str) -> None:
+        step_calls.append(name)
+
+    sink = RecordingEventSink()
+    use_case = GenerateLocalizationUseCase(
+        localize=lambda key, **kwargs: f"@@{key}",
+        event_sink=sink,
+        steps=GenerationSteps(
+            require_save_path=lambda save_path: Path(save_path or "dummy.sav"),
+            set_empire_profile=lambda _profile: _record("set_empire_profile"),
+            scan_all_technology_files=lambda: _record("scan_all_technology_files"),
+            build_technology_tree_relationships=lambda: _record(
+                "build_technology_tree_relationships"
+            ),
+            scan_all_tech_descriptions=lambda: _record("scan_all_tech_descriptions"),
+            precompute_overlong_trees=lambda: _record("precompute_overlong_trees"),
+            report_circular_dependencies=lambda: _record(
+                "report_circular_dependencies"
+            ),
+            display_generation_statistics=lambda: _record(
+                "display_generation_statistics"
+            ),
+            generate_all_yml_files=lambda: _record("generate_all_yml_files"),
+        ),
+    )
+    return use_case, sink, step_calls
+
+
+def _progress_events(events: list[GenerationEvent]) -> list[GenerationEvent]:
+    return [
+        event
+        for event in events
+        if event.kind is EventKind.PROGRESS and event.progress is not None
+    ]
+
+
+def _progress_values(events: list[GenerationEvent]) -> list[int]:
+    return [int(event.progress) for event in events if event.progress is not None]
+
+
+def test_generate_localization_progress_stage_order_and_milestones_are_stable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    use_case, sink, step_calls = _build_generate_localization_use_case(monkeypatch)
+
+    use_case.run(save_path="ignored.sav")
+
+    progress_events = _progress_events(sink.events)
+    assert [event.stage_id for event in progress_events] == [
+        StageId.SAVE_PARSE,
+        StageId.SAVE_PARSE,
+        StageId.LOAD_ORDER,
+        StageId.RELATIONS,
+        StageId.INGEST_L10N,
+        StageId.RENDER,
+        StageId.CYCLES,
+        StageId.WRITE_OUTPUT,
+        StageId.DONE,
+    ]
+    assert _progress_values(progress_events) == [
+        5,
+        10,
+        20,
+        35,
+        45,
+        50,
+        60,
+        80,
+        100,
+    ]
+    assert step_calls == [
+        "set_empire_profile",
+        "scan_all_technology_files",
+        "build_technology_tree_relationships",
+        "scan_all_tech_descriptions",
+        "precompute_overlong_trees",
+        "report_circular_dependencies",
+        "display_generation_statistics",
+        "generate_all_yml_files",
+    ]
+
+
+def test_generate_localization_progress_monotonic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    use_case, sink, _step_calls = _build_generate_localization_use_case(monkeypatch)
+
+    use_case.run(save_path="ignored.sav")
+
+    progress_values = _progress_values(_progress_events(sink.events))
+    assert progress_values
+    assert all(
+        current > previous for previous, current in pairwise(progress_values)
+    ), progress_values
+
+
+def test_generate_localization_progress_run_with_settings_uses_settings_milestones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    use_case, sink, step_calls = _build_generate_localization_use_case(monkeypatch)
+
+    settings = Settings.model_validate(
+        {
+            "schema_version": 1,
+            "paths": {},
+            "localization": {"language": "english"},
+            "display": {},
+            "progress_milestones": {
+                "save_parse_start": 1,
+                "save_parse_parse": 2,
+                "load_order": 3,
+                "relations": 4,
+                "ingest_l10n": 5,
+                "render": 6,
+                "cycles": 7,
+                "write_output": 8,
+                "done": 100,
+            },
+        },
+        strict=True,
+    )
+
+    use_case.run_with_settings(settings=settings, save_path="ignored.sav")
+
+    progress_events = _progress_events(sink.events)
+    assert [event.stage_id for event in progress_events] == [
+        StageId.SAVE_PARSE,
+        StageId.SAVE_PARSE,
+        StageId.LOAD_ORDER,
+        StageId.RELATIONS,
+        StageId.INGEST_L10N,
+        StageId.RENDER,
+        StageId.CYCLES,
+        StageId.WRITE_OUTPUT,
+        StageId.DONE,
+    ]
+    assert _progress_values(progress_events) == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        100,
+    ]
+    assert step_calls == [
+        "set_empire_profile",
+        "scan_all_technology_files",
+        "build_technology_tree_relationships",
+        "scan_all_tech_descriptions",
+        "precompute_overlong_trees",
+        "report_circular_dependencies",
+        "display_generation_statistics",
+        "generate_all_yml_files",
+    ]
 
 
 def test_stage_id_values_are_stable_machine_ids() -> None:
@@ -223,20 +328,34 @@ def test_run_generation_process_emits_typed_done_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fixture_root = Path(__file__).parent / "fixtures"
-    cfg = tmp_path / "config.ini"
     launcher_db = tmp_path / "launcher-v2.sqlite"
     _create_minimal_launcher_db(launcher_db)
-    _write_config(
-        cfg,
+    settings = _build_settings(
         base_game=fixture_root / "stellaris",
         workshop=fixture_root / "workshop",
         launcher_db=launcher_db,
     )
-    save_path = _write_save(tmp_path / "event-sink.sav")
+    save_path = _write_sav(
+        tmp_path / "event-sink.sav",
+        meta='name = "Event Sink Save"\n',
+        gamestate="\n".join(
+            [
+                "player = {",
+                "  0 = { country = 7 }",
+                "}",
+                "country = {",
+                "  7 = {",
+                '    name = "Event Sink Empire"',
+                "    authority = auth_democratic",
+                "  }",
+                "}",
+            ]
+        ),
+    )
 
     monkeypatch.chdir(tmp_path)
-    generator = TechTreeGenerator(str(cfg))
-    monkeypatch.setattr(generator._config_loader, "l", lambda key, **kwargs: f"@@{key}")
+    generator = TechTreeGenerator.from_settings(settings)
+    monkeypatch.setattr(generator, "_l", lambda key, **kwargs: f"@@{key}")
 
     sink = RecordingEventSink()
     generator.run_generation_process(save_path=save_path, event_sink=sink)

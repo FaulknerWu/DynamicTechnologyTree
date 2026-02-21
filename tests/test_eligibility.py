@@ -13,13 +13,11 @@ from models import Technology
 
 
 def _parse_potential_block(block_body: str) -> Block:
-    parsed = parse(
-        f"""
+    parsed = parse(f"""
 potential = {{
 {block_body}
 }}
-"""
-    )
+""")
     assert parsed.diagnostics == []
     assignments = [item for item in parsed.root.items if isinstance(item, Assignment)]
     assert len(assignments) == 1

@@ -3,48 +3,22 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import sqlite3
 import zipfile
+from pathlib import Path
 
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import dtt_core.load_order_resolver as load_order_resolver_module
+from conftest import _build_settings
 from gui.generation_worker import (
     GenerationOutcome,
     GenerationOutcomeCode,
     GenerationWorker,
 )
-
-import dtt_core.load_order_resolver as load_order_resolver_module
-
-
-def _write_config(
-    path: Path,
-    *,
-    base_game: Path,
-    workshop: Path,
-    launcher_db: Path,
-) -> None:
-    path.write_text(
-        """
-[paths]
-base_game_path = {base}
-mod_folder_path = {workshop}
-local_mod_folder_path =
-launcher_db_path = {launcher_db}
-
-[localization]
-language = english
-""".strip().format(
-            base=base_game,
-            workshop=workshop,
-            launcher_db=launcher_db,
-        ),
-        encoding="utf-8",
-    )
-
+from settings import Settings
 
 def _write_regular_save(path: Path) -> Path:
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -68,8 +42,8 @@ def _write_regular_save(path: Path) -> Path:
     return path
 
 
-def _run_worker(config_path: Path, save_path: Path) -> GenerationOutcome:
-    worker = GenerationWorker(str(config_path))
+def _run_worker(settings: Settings, save_path: Path) -> GenerationOutcome:
+    worker = GenerationWorker(settings)
     worker.save_path = str(save_path)
 
     outcomes: list[object] = []
@@ -87,19 +61,17 @@ def test_generation_worker_launcher_db_missing_surfaces_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fixture_root = Path(__file__).parent / "fixtures"
-    cfg = tmp_path / "config.ini"
     save_path = _write_regular_save(tmp_path / "missing-db.sav")
     missing_db = tmp_path / "missing-launcher-v2.sqlite"
 
-    _write_config(
-        cfg,
+    settings = _build_settings(
         base_game=fixture_root / "stellaris",
         workshop=fixture_root / "workshop",
         launcher_db=missing_db,
     )
 
     monkeypatch.chdir(tmp_path)
-    outcome = _run_worker(cfg, save_path)
+    outcome = _run_worker(settings, save_path)
 
     assert isinstance(outcome, GenerationOutcome)
     assert outcome.code == GenerationOutcomeCode.ERROR
@@ -111,20 +83,18 @@ def test_generation_worker_launcher_db_corrupt_surfaces_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fixture_root = Path(__file__).parent / "fixtures"
-    cfg = tmp_path / "config.ini"
     save_path = _write_regular_save(tmp_path / "corrupt-db.sav")
     launcher_db = tmp_path / "launcher-v2.sqlite"
     launcher_db.write_text("not a sqlite database", encoding="utf-8")
 
-    _write_config(
-        cfg,
+    settings = _build_settings(
         base_game=fixture_root / "stellaris",
         workshop=fixture_root / "workshop",
         launcher_db=launcher_db,
     )
 
     monkeypatch.chdir(tmp_path)
-    outcome = _run_worker(cfg, save_path)
+    outcome = _run_worker(settings, save_path)
 
     assert isinstance(outcome, GenerationOutcome)
     assert outcome.code == GenerationOutcomeCode.ERROR
@@ -136,13 +106,11 @@ def test_generation_worker_launcher_db_locked_surfaces_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fixture_root = Path(__file__).parent / "fixtures"
-    cfg = tmp_path / "config.ini"
     save_path = _write_regular_save(tmp_path / "locked-db.sav")
     launcher_db = tmp_path / "launcher-v2.sqlite"
     launcher_db.write_bytes(b"")
 
-    _write_config(
-        cfg,
+    settings = _build_settings(
         base_game=fixture_root / "stellaris",
         workshop=fixture_root / "workshop",
         launcher_db=launcher_db,
@@ -154,7 +122,7 @@ def test_generation_worker_launcher_db_locked_surfaces_error(
     monkeypatch.setattr(load_order_resolver_module.sqlite3, "connect", _locked_connect)
 
     monkeypatch.chdir(tmp_path)
-    outcome = _run_worker(cfg, save_path)
+    outcome = _run_worker(settings, save_path)
 
     assert isinstance(outcome, GenerationOutcome)
     assert outcome.code == GenerationOutcomeCode.ERROR

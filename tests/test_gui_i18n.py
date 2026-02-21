@@ -2,85 +2,70 @@
 
 from __future__ import annotations
 
-import configparser
 import os
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import pytest
 
 # Must be set before creating the QApplication.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E402
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+)  # noqa: E402
 
 from gui.generation_worker import GenerationOutcome, GenerationOutcomeCode
 from gui.i18n import default_language_from_system, map_locale_to_language_key, t
 from gui.main_window import MainWindow
-
-
-@pytest.fixture(scope="session")
-def qt_app() -> Any:
-    """Create a single QApplication for offscreen GUI tests."""
-
-    app: Any = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-
-    # Prevent the app from quitting when the last test window closes.
-    try:
-        app.setQuitOnLastWindowClosed(False)
-    except Exception:
-        # Some stubs/type checkers model this as QCoreApplication; runtime is fine.
-        pass
-    return app
-
-
-@pytest.fixture()
-def message_boxes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> dict[str, list[tuple[tuple[Any, ...], dict[str, Any]]]]:
-    """Patch QMessageBox to avoid modal dialogs during tests."""
-
-    calls: dict[str, list[tuple[tuple[Any, ...], dict[str, Any]]]] = {
-        "warning": [],
-        "critical": [],
-        "information": [],
-    }
-
-    def _stub(kind: str) -> Callable[..., Any]:
-        def _impl(*args: Any, **kwargs: Any) -> Any:
-            calls[kind].append((args, kwargs))
-            return QMessageBox.StandardButton.Ok
-
-        return _impl
-
-    monkeypatch.setattr(QMessageBox, "warning", _stub("warning"))
-    monkeypatch.setattr(QMessageBox, "critical", _stub("critical"))
-    monkeypatch.setattr(QMessageBox, "information", _stub("information"))
-    return calls
-
+from gui.settings_renderer import PathFieldWidget
+from settings_store import load_settings
 
 def _make_window(tmp_path: Path, qt_app: Any) -> MainWindow:
-    cfg_path = tmp_path / "config.ini"
-    window = MainWindow(config_path=cfg_path)
+    settings_path = tmp_path / "settings.json"
+    window = MainWindow(config_path=settings_path)
     window.show()
     qt_app.processEvents()
     return window
 
 
+def _language_combo(window: MainWindow) -> QComboBox:
+    return cast(
+        QComboBox,
+        window.settings_panel.settings_renderer.widget_for("localization.language"),
+    )
+
+
+def _path_widget(window: MainWindow, field: str) -> PathFieldWidget:
+    return cast(
+        PathFieldWidget,
+        window.settings_panel.settings_renderer.widget_for(f"paths.{field}"),
+    )
+
+
+def _configure_required_paths(window: MainWindow, tmp_path: Path) -> None:
+    base_game_dir = tmp_path / "game"
+    workshop_dir = tmp_path / "workshop"
+    launcher_db = tmp_path / "launcher-v2.sqlite"
+    base_game_dir.mkdir(exist_ok=True)
+    workshop_dir.mkdir(exist_ok=True)
+    launcher_db.write_text("", encoding="utf-8")
+
+    _path_widget(window, "base_game_path").setText(str(base_game_dir))
+    _path_widget(window, "mod_folder_path").setText(str(workshop_dir))
+    _path_widget(window, "launcher_db_path").setText(str(launcher_db))
+
+
 def test_t_falls_back_to_english_for_missing_keys() -> None:
-    # french exists but intentionally has no ui_* strings.
     assert t("ui_btn_generate", "french") == t("ui_btn_generate", "english")
 
 
 def test_locale_mapping_and_default_language_selection() -> None:
     assert map_locale_to_language_key("en_US") == "english"
     assert map_locale_to_language_key("zh_CN") == "simp_chinese"
-    # Windows may provide display-name locale strings.
     assert map_locale_to_language_key("Chinese (Simplified)_China") == "simp_chinese"
     assert map_locale_to_language_key("pt_BR.UTF-8") == "braz_por"
-    # braz_por has no ui_* keys, so GUI defaults to english for clarity.
     assert default_language_from_system(locale_name="pt_BR") == "english"
     assert (
         default_language_from_system(locale_name="Chinese (Simplified)_China")
@@ -88,26 +73,32 @@ def test_locale_mapping_and_default_language_selection() -> None:
     )
 
 
-def test_runtime_retranslation_updates_window_tabs_and_placeholders(
+def test_runtime_retranslation_updates_window_tabs_and_labels(
     tmp_path: Path, qt_app: Any, message_boxes
 ) -> None:
     window = _make_window(tmp_path, qt_app)
     try:
-        combo = window.config_editor.language_combo
-        tabs = window.config_editor.tabs
-        paths_index = tabs.indexOf(window.config_editor.paths_tab)
+        combo = _language_combo(window)
+        tabs = window.settings_panel.tabs_widget
+        paths_tab = window.settings_panel.settings_renderer.tab_widget_for(
+            "ui_tab_paths"
+        )
+        assert paths_tab is not None
+        paths_index = tabs.indexOf(paths_tab)
         assert paths_index != -1
 
-        # Force a known starting point.
+        max_children_label = window.settings_panel.settings_renderer.label_for(
+            "display.max_children_per_node"
+        )
+
         combo.setCurrentText("english")
         qt_app.processEvents()
 
         title_en = window.windowTitle()
         generate_en = window.generate_button.text()
         tab_en = tabs.tabText(paths_index)
-        max_children_label_en = window.config_editor.max_children_label.text()
+        max_children_label_en = max_children_label.text()
 
-        # Switch english -> simp_chinese and verify visible text changes.
         combo.setCurrentText("simp_chinese")
         qt_app.processEvents()
 
@@ -123,10 +114,8 @@ def test_runtime_retranslation_updates_window_tabs_and_placeholders(
         assert tabs.tabText(paths_index) == t("ui_tab_paths", "simp_chinese")
         assert tab_en == t("ui_tab_paths", "english")
 
-        assert window.config_editor.max_children_label.text() != max_children_label_en
-        assert window.config_editor.max_children_label.text() == t(
-            "ui_label_max_children", "simp_chinese"
-        )
+        assert max_children_label.text() != max_children_label_en
+        assert max_children_label.text() == t("ui_label_max_children", "simp_chinese")
         assert max_children_label_en == t("ui_label_max_children", "english")
     finally:
         window.close()
@@ -137,51 +126,34 @@ def test_runtime_retranslation_updates_window_tabs_and_placeholders(
 def test_save_config_validation_and_persistence(
     tmp_path: Path, qt_app: Any, message_boxes
 ) -> None:
-    cfg_path = tmp_path / "config.ini"
+    settings_path = tmp_path / "settings.json"
     window = _make_window(tmp_path, qt_app)
     try:
-        # Missing required paths -> warning.
-        window.config_editor.base_game_path_input.setText("")
-        window.config_editor.mod_folder_path_input.setText("")
+        language_combo = _language_combo(window)
+        language_combo.setEditText("not_a_supported_language")
+        qt_app.processEvents()
+
         message_boxes["warning"].clear()
 
         window.on_save_clicked()
-        assert message_boxes["warning"], (
-            "expected QMessageBox.warning for invalid config"
-        )
-        assert not cfg_path.exists(), "invalid config should not be written"
+        assert message_boxes[
+            "warning"
+        ], "expected QMessageBox.warning for invalid settings"
+        assert not settings_path.exists(), "invalid settings should not be written"
 
-        # Required paths filled -> config.ini written with selected language.
-        base_game_dir = tmp_path / "game"
-        workshop_dir = tmp_path / "workshop"
-        launcher_db = tmp_path / "launcher-v2.sqlite"
-        base_game_dir.mkdir()
-        workshop_dir.mkdir()
-        launcher_db.write_text("", encoding="utf-8")
-
-        window.config_editor.base_game_path_input.setText(str(base_game_dir))
-        window.config_editor.mod_folder_path_input.setText(str(workshop_dir))
-        window.config_editor.launcher_db_path_input.setText(str(launcher_db))
-        window.config_editor.language_combo.setCurrentText("simp_chinese")
+        language_combo.setCurrentText("simp_chinese")
+        _configure_required_paths(window, tmp_path)
         qt_app.processEvents()
-        window.config.read_string(
-            """
-[localization]
-priority_mods = 12345
-""".strip()
-        )
 
         window.on_save_clicked()
-        assert cfg_path.exists(), "expected config.ini to be written"
+        assert settings_path.exists(), "expected settings.json to be written"
 
-        parser = configparser.ConfigParser()
-        parser.read(cfg_path, encoding="utf-8")
-        assert parser.get("localization", "language") == "simp_chinese"
-        assert not parser.has_option("localization", "priority_mods")
+        loaded = load_settings(settings_path)
+        assert loaded.localization.language == "simp_chinese"
 
-        text = cfg_path.read_text(encoding="utf-8")
-        assert "[localization]" in text
-        assert "language = simp_chinese" in text
+        text = settings_path.read_text(encoding="utf-8")
+        assert '"localization"' in text
+        assert '"language": "simp_chinese"' in text
         assert "priority_mods" not in text
     finally:
         window.close()
@@ -192,7 +164,6 @@ priority_mods = 12345
 def test_language_locked_during_generation(
     tmp_path: Path, qt_app: Any, message_boxes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Dummy signal object to satisfy `.connect()` usage without real threads.
     class _Signal:
         def __init__(self) -> None:
             self._slots: list[Callable[..., Any]] = []
@@ -205,7 +176,7 @@ def test_language_locked_during_generation(
                 slot(*args, **kwargs)
 
     class DummyWorker:
-        def __init__(self, _config_path: str) -> None:
+        def __init__(self, _settings: Any) -> None:
             self.log_message = _Signal()
             self.progress = _Signal()
             self.finished = _Signal()
@@ -213,6 +184,7 @@ def test_language_locked_during_generation(
 
         def start(self) -> None:
             self._running = True
+            self._running = False
 
         def isRunning(self) -> bool:
             return self._running
@@ -224,7 +196,7 @@ def test_language_locked_during_generation(
             self._running = False
             return True
 
-        def deleteLater(self) -> None:  # pragma: no cover
+        def deleteLater(self) -> None:
             return
 
     import gui.main_window as main_window_module
@@ -238,27 +210,20 @@ def test_language_locked_during_generation(
 
     window = _make_window(tmp_path, qt_app)
     try:
-        base_game_dir = tmp_path / "game"
-        workshop_dir = tmp_path / "workshop"
-        launcher_db = tmp_path / "launcher-v2.sqlite"
-        base_game_dir.mkdir()
-        workshop_dir.mkdir()
-        launcher_db.write_text("", encoding="utf-8")
-        window.config_editor.base_game_path_input.setText(str(base_game_dir))
-        window.config_editor.mod_folder_path_input.setText(str(workshop_dir))
-        window.config_editor.launcher_db_path_input.setText(str(launcher_db))
+        _configure_required_paths(window, tmp_path)
         qt_app.processEvents()
 
         window.on_generate_clicked()
+        language_combo = _language_combo(window)
 
-        assert not window.config_editor.language_combo.isEnabled()
+        assert not language_combo.isEnabled()
         assert not window.save_button.isEnabled()
 
         window.on_generation_finished(
             GenerationOutcome(code=GenerationOutcomeCode.SUCCESS)
         )
 
-        assert window.config_editor.language_combo.isEnabled()
+        assert language_combo.isEnabled()
         assert window.save_button.isEnabled()
     finally:
         window.close()

@@ -15,13 +15,11 @@ from dtt_core.trigger_evaluator import EmpireProfile
 
 
 def _parse_trigger_block(block_body: str) -> Block:
-    parsed = parse(
-        f"""
+    parsed = parse(f"""
 trigger = {{
 {block_body}
 }}
-"""
-    )
+""")
     assert parsed.diagnostics == []
 
     assignments = [item for item in parsed.root.items if isinstance(item, Assignment)]
@@ -132,6 +130,14 @@ def test_collision_raises_and_exposes_collision_details() -> None:
             merged_defs,
             EmpireProfile.auto("regular"),
         )
+
+    assert exc.value.code == "technology_swap_collision"
+    assert exc.value.details_dict()["collisions"] == (
+        "tech_shared_variant: tech_base_a, tech_base_b"
+    )
+    assert "tech_shared_variant" in str(exc.value)
+    assert "tech_base_a" in str(exc.value)
+    assert "tech_base_b" in str(exc.value)
 
     report = exc.value.report
     assert list(report.collisions) == ["tech_shared_variant"]
