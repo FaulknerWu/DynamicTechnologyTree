@@ -7,10 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dtt_core.file_decode import format_decode_warning, read_text_with_diagnostics
-
-STEAM_APP_ID = "281990"
-GAME_DIR_NAME = "Stellaris"
-USER_DATA_SUBPATH = os.path.join("Paradox Interactive", "Stellaris")
+from settings import Settings
 
 
 @dataclass
@@ -24,6 +21,9 @@ class DetectedPaths:
 
 
 class PathDetector:
+    def __init__(self, settings: Settings | None = None) -> None:
+        self._settings = settings or Settings()
+
     def detect_all(self) -> DetectedPaths:
         steam_path = self.detect_steam_path()
         library_paths = self._steam_library_paths(steam_path)
@@ -66,23 +66,34 @@ class PathDetector:
 
     def _user_data_candidates(self) -> list[Path]:
         home = Path.home()
-        return [home / "Documents" / USER_DATA_SUBPATH]
+        components = self._settings.paths.user_data_subpath_components
+        return [home / "Documents" / Path(*components)]
 
     def _detect_launcher_db_path(self, user_data_path: str | None) -> str | None:
         if not user_data_path:
             return None
-        candidate = os.path.join(user_data_path, "launcher-v2.sqlite")
+        candidate = os.path.join(
+            user_data_path, self._settings.paths.launcher_db_filename
+        )
         return candidate if os.path.exists(candidate) else None
 
     def _detect_local_mod_path(self, user_data_path: str | None) -> str | None:
         if not user_data_path:
             return None
-        candidate = os.path.join(user_data_path, "mod")
+        candidate = os.path.join(
+            user_data_path,
+            self._settings.paths.local_mod_directory_name,
+        )
         return candidate if os.path.exists(candidate) else None
 
     def _detect_game_path_from_libraries(self, library_paths: list[str]) -> str | None:
         for library_path in library_paths:
-            candidate = os.path.join(library_path, "steamapps", "common", GAME_DIR_NAME)
+            candidate = os.path.join(
+                library_path,
+                "steamapps",
+                "common",
+                self._settings.paths.game_directory_name,
+            )
             if os.path.exists(candidate):
                 return candidate
         return None
@@ -92,7 +103,11 @@ class PathDetector:
     ) -> str | None:
         for library_path in library_paths:
             candidate = os.path.join(
-                library_path, "steamapps", "workshop", "content", STEAM_APP_ID
+                library_path,
+                "steamapps",
+                "workshop",
+                "content",
+                self._settings.paths.steam_app_id,
             )
             if os.path.exists(candidate):
                 return candidate
@@ -120,7 +135,13 @@ class PathDetector:
         if not os.path.exists(vdf_path):
             return []
         try:
-            decoded = read_text_with_diagnostics(Path(vdf_path))
+            decoded = read_text_with_diagnostics(
+                Path(vdf_path),
+                preferred_encodings=self._settings.decode.preferred_encodings,
+                fallback_encodings=self._settings.decode.fallback_encodings,
+                replacement_encoding=self._settings.decode.replacement_encoding,
+                on_failure=self._settings.decode.on_failure,
+            )
         except OSError:
             return []
         if decoded.diagnostics.has_warning:

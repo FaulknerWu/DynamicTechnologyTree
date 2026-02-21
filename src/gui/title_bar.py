@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 
 class CustomTitleBar(QWidget):
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._drag_position: Optional[QPoint] = None
+        self._drag_position: QPoint | None = None
 
         self.setFixedHeight(32)
         self.setStyleSheet("""
@@ -42,79 +40,87 @@ class CustomTitleBar(QWidget):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.setCursor(Qt.CursorShape.ArrowCursor)
 
-        self.close_button.setStyleSheet(
-            """
+        self.close_button.setStyleSheet("""
             QPushButton { border: none; padding: 8px 12px; }
             QPushButton:hover { background-color: #e81123; color: white; }
-        """
-        )
+        """)
 
         for btn in (self.min_button, self.max_button):
-            btn.setStyleSheet(
-                """
+            btn.setStyleSheet("""
                 QPushButton { border: none; padding: 8px 12px; }
                 QPushButton:hover { background-color: #e0e0e0; }
-            """
-            )
+            """)
 
         layout.addWidget(self.min_button)
         layout.addWidget(self.max_button)
         layout.addWidget(self.close_button)
 
         window = self.window()
-        if hasattr(window, "windowTitleChanged"):
+        if isinstance(window, QWidget):
             window.windowTitleChanged.connect(self.title_label.setText)
 
     def set_maximized(self, is_maximized: bool) -> None:
         self.max_button.setText("❐" if is_maximized else "□")
 
-    def _get_main_window(self) -> Optional[QWidget]:
+    def _get_main_window(self) -> QWidget | None:
         """Get the top-level main window."""
-        widget = self.parent()
+        widget = self.parentWidget()
         while widget is not None:
-            parent = widget.parent()
+            parent = widget.parentWidget()
             if parent is None:
                 return widget
             widget = parent
         return None
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mousePressEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is None:
+            super().mousePressEvent(a0)
+            return
+        if a0.button() == Qt.MouseButton.LeftButton:
             main_window = self._get_main_window()
             if main_window:
                 if not main_window.isMaximized():
                     handle = main_window.windowHandle()
                     if handle and handle.startSystemMove():
                         self._drag_position = None
-                        event.accept()
+                        a0.accept()
                         return
-                self._drag_position = event.globalPosition().toPoint() - main_window.pos()
-            event.accept()
+                self._drag_position = a0.globalPosition().toPoint() - main_window.pos()
+            a0.accept()
         else:
-            super().mousePressEvent(event)
+            super().mousePressEvent(a0)
 
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._drag_position is not None and event.buttons() & Qt.MouseButton.LeftButton:
+    def mouseMoveEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is None:
+            super().mouseMoveEvent(a0)
+            return
+        if self._drag_position is not None and a0.buttons() & Qt.MouseButton.LeftButton:
             main_window = self._get_main_window()
             if main_window and not main_window.isMaximized():
-                main_window.move(event.globalPosition().toPoint() - self._drag_position)
-            event.accept()
+                main_window.move(a0.globalPosition().toPoint() - self._drag_position)
+            a0.accept()
         else:
-            super().mouseMoveEvent(event)
+            super().mouseMoveEvent(a0)
 
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mouseReleaseEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is None:
+            super().mouseReleaseEvent(a0)
+            return
+        if a0.button() == Qt.MouseButton.LeftButton:
             self._drag_position = None
-            event.accept()
+            a0.accept()
         else:
-            super().mouseReleaseEvent(event)
+            super().mouseReleaseEvent(a0)
 
-    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mouseDoubleClickEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is None:
+            super().mouseDoubleClickEvent(a0)
+            return
+        if a0.button() == Qt.MouseButton.LeftButton:
             self.max_button.click()
-            event.accept()
+            a0.accept()
         else:
-            super().mouseDoubleClickEvent(event)
+            super().mouseDoubleClickEvent(a0)
 
     def _get_window_title(self) -> str:
         window = self.window()

@@ -5,16 +5,22 @@ import os
 from typing import Any
 
 from localization import LOCALIZATION_STRINGS
+from settings import require_supported_language
 
 
 def t(key: str, lang: str | None = None, **kwargs: Any) -> str:
     """Translate a string key using LOCALIZATION_STRINGS.
 
-    - Falls back to English when the language/key is missing.
-    - Never raises for missing keys or bad .format() placeholders.
+    - Falls back to English when a translation key is missing.
+    - Raises ValueError for unsupported explicit language codes.
+    - Never raises for bad .format() placeholders.
     """
 
-    lang_code = (lang or "english").strip().lower() or "english"
+    if lang is None:
+        lang_code = "english"
+    else:
+        lang_code = require_supported_language(lang, field_name="lang")
+
     lang_dict = LOCALIZATION_STRINGS.get(lang_code) or LOCALIZATION_STRINGS.get(
         "english", {}
     )
@@ -241,4 +247,18 @@ def _get_qt_ui_languages() -> list[str]:
 
 def _has_ui_keys(lang: str) -> bool:
     lang_dict = LOCALIZATION_STRINGS.get(lang, {})
-    return any(k.startswith("ui_") for k in lang_dict)
+    if not isinstance(lang_dict, dict):
+        return False
+
+    settings_metadata_prefixes = (
+        "ui_label_",
+        "ui_help_",
+        "ui_tab_",
+        "ui_action_",
+    )
+    return any(
+        isinstance(key, str)
+        and key.startswith("ui_")
+        and not key.startswith(settings_metadata_prefixes)
+        for key in lang_dict
+    )

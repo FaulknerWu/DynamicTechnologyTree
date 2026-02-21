@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import configparser
 import os
-import sys
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, QSignalBlocker, Qt
 from PyQt6.QtGui import QCloseEvent, QFontDatabase
 from PyQt6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -22,61 +22,66 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from gui.config_editor import ConfigEditor
+from gui import _default_settings_path
 from gui.generation_worker import (
     GenerationOutcome,
     GenerationOutcomeCode,
     GenerationWorker,
 )
 from gui.i18n import t
+from gui.path_detector import PathDetector
+from gui.settings_panel import SettingsPanel
 from gui.title_bar import CustomTitleBar
-
-# Note: keep imports flat to match the project's packaging/runtime model.
+from settings import Settings, require_supported_language, settings_json_schema
+from settings_store import SettingsStoreError, load_settings, save_settings
 
 
 class MainWindow(QMainWindow):
     def __init__(
         self,
-        config_path: Optional[Union[str, os.PathLike]] = None,
-        parent: Optional[QWidget] = None,
+        config_path: str | os.PathLike[str] | None = None,
+        application_path: str | os.PathLike[str] | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        # Title is retranslated after config/language is loaded.
-        self.setWindowTitle(t("ui_app_title", "english"))
         self.setMinimumSize(700, 500)
 
-        self.config_path = (
-            Path(config_path) if config_path else self._default_config_path()
+        self.settings_path = (
+            Path(config_path) if config_path else _default_settings_path()
         )
-        self.config = configparser.ConfigParser()
-        self.worker: Optional[GenerationWorker] = None
+        self.application_path = Path(application_path) if application_path else None
+        self.config_path = self.settings_path
+        self.settings = Settings()
+        self.setWindowTitle(t("ui_app_title", self._current_lang()))
+
+        self.worker: GenerationWorker | None = None
         self._selected_save_path = ""
         self._pending_empire_options: list[dict[str, Any]] = []
+
+        self._settings_file_error = ""
+        self._generation_blocking_error = ""
 
         self._build_ui()
         self.load_config()
         self.retranslate_ui()
         self._check_and_auto_detect()
+        self._refresh_validation_state()
 
     def _current_lang(self) -> str:
-        # Task constraint: read language from the combo's currentText.
-        if hasattr(self, "config_editor"):
-            lang = self.config_editor.language_combo.currentText().strip().lower()
-            return lang or "english"
-        return "english"
+        try:
+            return require_supported_language(self.settings.localization.language)
+        except ValueError:
+            return "english"
 
     def _t(self, key: str, **kwargs: object) -> str:
         return t(key, self._current_lang(), **kwargs)
 
-    def _default_config_path(self) -> Path:
-        frozen = getattr(sys, "frozen", False)
-        application_path = (
-            Path(sys.executable).parent
-            if frozen
-            else Path(sys.argv[0]).resolve().parent
-        )
-        return application_path / "config.ini"
+    def _t_or_default(self, key: str, fallback: str) -> str:
+        translated = self._t(key)
+        if translated and translated != key:
+            return translated
+        return fallback
 
     def _build_ui(self) -> None:
         central_widget = QWidget(self)
@@ -98,17 +103,51 @@ class MainWindow(QMainWindow):
         self.title_bar.set_maximized(self.isMaximized())
         main_layout.addWidget(self.title_bar)
 
-        # Content area with padding
         content_widget = QWidget(central_widget)
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(10, 10, 10, 10)
         content_layout.setSpacing(8)
 
-        self.config_editor = ConfigEditor(content_widget)
-        self.config_editor.language_combo.currentTextChanged.connect(
-            self._on_language_selection
+        profiles_row = QHBoxLayout()
+        self.settings_profile_label = QLabel(content_widget)
+        profiles_row.addWidget(self.settings_profile_label)
+
+        self.settings_profile_combo = QComboBox(content_widget)
+        self.settings_profile_combo.setObjectName("settingsProfileCombo")
+        self.settings_profile_combo.currentTextChanged.connect(
+            self._on_profile_combo_changed
         )
-        content_layout.addWidget(self.config_editor)
+        profiles_row.addWidget(self.settings_profile_combo, 1)
+
+        self.open_profile_button = QPushButton(content_widget)
+        self.open_profile_button.setObjectName("openSettingsProfileButton")
+        self.open_profile_button.clicked.connect(self.on_open_profile_clicked)
+        profiles_row.addWidget(self.open_profile_button)
+
+        self.save_as_profile_button = QPushButton(content_widget)
+        self.save_as_profile_button.setObjectName("saveAsSettingsProfileButton")
+        self.save_as_profile_button.clicked.connect(self.on_save_as_profile_clicked)
+        profiles_row.addWidget(self.save_as_profile_button)
+
+        content_layout.addLayout(profiles_row)
+
+        self.settings_panel = SettingsPanel(
+            settings_json_schema(),
+            self.settings,
+            parent=content_widget,
+            translate=lambda key: self._t(key),
+        )
+        self.settings_panel.validation_changed.connect(
+            self._on_settings_panel_validation_changed
+        )
+        self.settings_panel.raw_apply_finished.connect(self._on_raw_apply_finished)
+        content_layout.addWidget(self.settings_panel)
+
+        self.settings_error_label = QLabel(content_widget)
+        self.settings_error_label.setWordWrap(True)
+        self.settings_error_label.setStyleSheet("color: #c62828;")
+        self.settings_error_label.setVisible(False)
+        content_layout.addWidget(self.settings_error_label)
 
         controls_layout = QHBoxLayout()
         self.generate_button = QPushButton(self._t("ui_btn_generate"), content_widget)
@@ -138,11 +177,7 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
 
-    def _on_language_selection(self, _lang_text: str) -> None:
-        self.retranslate_ui()
-
     def retranslate_ui(self) -> None:
-        # Minimum runtime retranslation requirements for this task.
         self.setWindowTitle(self._t("ui_app_title"))
 
         if self.worker and self.worker.isRunning():
@@ -150,10 +185,18 @@ class MainWindow(QMainWindow):
         else:
             self.generate_button.setText(self._t("ui_btn_generate"))
 
-        if hasattr(self, "save_button"):
-            self.save_button.setText(self._t("ui_btn_save_config"))
+        self.save_button.setText(self._t("ui_btn_save_config"))
+        self.settings_profile_label.setText(
+            self._t_or_default("ui_label_settings_profile", "Settings Profile:")
+        )
+        self.open_profile_button.setText(
+            self._t_or_default("ui_btn_open_profile", "Open Profile...")
+        )
+        self.save_as_profile_button.setText(
+            self._t_or_default("ui_btn_save_profile_as", "Save Profile As...")
+        )
+        self.settings_panel.retranslate(lambda key: self._t(key))
 
-        # Status bar string is based on current detection state.
         self._update_detection_status()
 
     def _toggle_max_restore(self) -> None:
@@ -172,44 +215,158 @@ class MainWindow(QMainWindow):
         self.log_output.append(message)
 
     def load_config(self) -> None:
-        self.config = configparser.ConfigParser()
-        if self.config_path.exists():
-            self.config.read(self.config_path, encoding="utf-8")
-        self.config_editor.load_from_config(self.config)
+        self._register_profile_path(self.settings_path)
 
-        if self.config_path.exists():
-            self.append_log(self._t("ui_log_loaded_config", path=str(self.config_path)))
-        else:
-            self.append_log(
-                self._t("ui_log_config_not_found", path=str(self.config_path))
+        if self._is_ini_settings_path(self.settings_path):
+            self._settings_file_error = self._format_ini_not_supported_error(
+                self.settings_path
             )
+            self.append_log(self._settings_file_error)
+            self.settings_panel.refresh_from_settings()
+            self._refresh_validation_state()
+            return
+
+        if not self.settings_path.exists():
+            self._settings_file_error = ""
+            self.append_log(
+                self._t("ui_log_config_not_found", path=str(self.settings_path))
+            )
+            self.settings_panel.refresh_from_settings()
+            self._refresh_validation_state()
+            return
+
+        try:
+            loaded_settings = load_settings(self.settings_path)
+        except SettingsStoreError as exc:
+            self._settings_file_error = self._format_settings_store_error(
+                self.settings_path, exc
+            )
+            self.append_log(self._settings_file_error)
+            self._refresh_validation_state()
+            return
+
+        self._load_settings_into_ssot(loaded_settings)
+        self._settings_file_error = ""
+        self.settings_panel.refresh_from_settings()
+        self.append_log(self._t("ui_log_loaded_config", path=str(self.settings_path)))
+        self._refresh_validation_state()
+
+    def switch_settings_profile(
+        self, settings_path: str | os.PathLike[str]
+    ) -> bool:
+        target_path = Path(settings_path)
+        previous_path = self.settings_path
+
+        if target_path == previous_path:
+            return True
+
+        if self._is_ini_settings_path(target_path):
+            error_message = self._format_ini_not_supported_error(target_path)
+            self._settings_file_error = error_message
+            self.settings_path = previous_path
+            self.config_path = previous_path
+            self._set_current_profile_path(previous_path)
+            self._refresh_validation_state()
+            QMessageBox.warning(
+                self,
+                self._t("ui_msgbox_title_config_error"),
+                error_message,
+            )
+            return False
+
+        if target_path.exists():
+            try:
+                loaded_settings = load_settings(target_path)
+            except SettingsStoreError as exc:
+                error_message = self._format_settings_store_error(target_path, exc)
+                self._settings_file_error = error_message
+                self.settings_path = previous_path
+                self.config_path = previous_path
+                self._set_current_profile_path(previous_path)
+                self._refresh_validation_state()
+                QMessageBox.warning(
+                    self,
+                    self._t("ui_msgbox_title_config_error"),
+                    error_message,
+                )
+                return False
+
+            self._load_settings_into_ssot(loaded_settings)
+            self._settings_file_error = ""
+            self.append_log(self._t("ui_log_loaded_config", path=str(target_path)))
+        else:
+            self._settings_file_error = ""
+            self.append_log(self._t("ui_log_config_not_found", path=str(target_path)))
+
+        self.settings_path = target_path
+        self.config_path = target_path
+        self._register_profile_path(target_path)
+        self._set_current_profile_path(target_path)
+        self.settings_panel.refresh_from_settings()
+        self.retranslate_ui()
+        self._refresh_validation_state()
+        return True
+
+    def _load_settings_into_ssot(self, incoming: Settings) -> None:
+        incoming_snapshot = incoming.model_copy(deep=True)
+        for field_name in Settings.model_fields:
+            setattr(self.settings, field_name, getattr(incoming_snapshot, field_name))
+
+    def _format_settings_store_error(
+        self,
+        path: Path,
+        exc: SettingsStoreError,
+    ) -> str:
+        details = exc.message
+        if exc.path:
+            dotted_path = ".".join(str(part) for part in exc.path)
+            details = f"{details} ({dotted_path})"
+        if exc.line is not None and exc.column is not None:
+            details = f"{details} at line {exc.line}, column {exc.column}"
+
+        return self._build_actionable_settings_error(f"{details} [{path}]")
 
     def _check_and_auto_detect(self) -> None:
-        """Auto-detect paths if required fields are empty."""
-        base_path = self.config.get("paths", "base_game_path", fallback="").strip()
-        mod_path = self.config.get("paths", "mod_folder_path", fallback="").strip()
+        base_path = self.settings.paths.base_game_path.strip()
+        mod_path = self.settings.paths.mod_folder_path.strip()
 
         if not base_path or not mod_path:
             self.append_log(self._t("ui_log_autodetect_start"))
             self.status_bar.showMessage(self._t("ui_status_autodetecting"))
-            self.config_editor.auto_detect_all_paths()
-            detected_count = sum(
-                1
-                for field in (
-                    self.config_editor.base_game_path_input,
-                    self.config_editor.mod_folder_path_input,
-                    self.config_editor.launcher_db_path_input,
-                    self.config_editor.local_mod_folder_path_input,
-                )
-                if field.text().strip()
+
+            detected = PathDetector(self.settings).detect_all()
+            detected_count = 0
+            detected_count += self._set_path_if_empty(
+                "base_game_path", detected.game_path
             )
+            detected_count += self._set_path_if_empty(
+                "mod_folder_path", detected.workshop_path
+            )
+            detected_count += self._set_path_if_empty(
+                "launcher_db_path", detected.launcher_db_path
+            )
+            detected_count += self._set_path_if_empty(
+                "local_mod_folder_path", detected.local_mod_path
+            )
+
+            if detected_count:
+                self.settings_panel.refresh_from_settings()
+
             self.append_log(self._t("ui_log_autodetect_done", count=detected_count))
 
         self._update_detection_status()
 
+    def _set_path_if_empty(self, field_name: str, detected_value: str | None) -> int:
+        current_value = getattr(self.settings.paths, field_name, "")
+        if current_value.strip() or not detected_value:
+            return 0
+
+        setattr(self.settings.paths, field_name, detected_value)
+        return 1
+
     def _update_detection_status(self) -> None:
-        base_path = self.config_editor.base_game_path_input.text().strip()
-        mod_path = self.config_editor.mod_folder_path_input.text().strip()
+        base_path = self.settings.paths.base_game_path.strip()
+        mod_path = self.settings.paths.mod_folder_path.strip()
 
         if base_path and mod_path:
             self.status_bar.showMessage(self._t("ui_status_paths_ok"))
@@ -220,33 +377,213 @@ class MainWindow(QMainWindow):
         else:
             self.status_bar.showMessage(self._t("ui_status_need_manual_paths"))
 
+    def _required_path_validation_error(self) -> str:
+        missing_fields: list[str] = []
+        if not self.settings.paths.base_game_path.strip():
+            missing_fields.append(self._t("ui_field_base_game_path"))
+        if not self.settings.paths.mod_folder_path.strip():
+            missing_fields.append(self._t("ui_field_workshop_path"))
+        if not self.settings.paths.launcher_db_path.strip():
+            missing_fields.append(self._t("ui_field_launcher_db_path"))
+
+        if missing_fields:
+            return self._t(
+                "ui_error_missing_required_paths",
+                fields=", ".join(missing_fields),
+            )
+        return ""
+
+    def _build_actionable_settings_error(self, detail: str) -> str:
+        hint = self._t_or_default(
+            "ui_hint_fix_settings",
+            "Fix the highlighted fields or choose a valid JSON settings profile.",
+        )
+        cleaned_detail = detail.strip()
+        if not cleaned_detail:
+            return hint
+        return f"{cleaned_detail} {hint}"
+
+    def _is_ini_settings_path(self, path: Path) -> bool:
+        return path.suffix.lower() == ".ini"
+
+    def _format_ini_not_supported_error(self, path: Path) -> str:
+        return self._build_actionable_settings_error(
+            f"INI settings profiles are no longer supported [{path}]. "
+            "Use a JSON settings profile (*.json), for example settings.json."
+        )
+
+    def _compute_generation_blocking_error(self) -> str:
+        if self._settings_file_error:
+            return self._settings_file_error
+
+        if not self.settings_panel.is_valid:
+            return self._build_actionable_settings_error(
+                self.settings_panel.validation_error
+            )
+
+        required_paths_error = self._required_path_validation_error()
+        if required_paths_error:
+            return self._build_actionable_settings_error(required_paths_error)
+
+        return ""
+
+    def _refresh_validation_state(self) -> None:
+        self._generation_blocking_error = self._compute_generation_blocking_error()
+        self.settings_error_label.setVisible(bool(self._generation_blocking_error))
+        if self._generation_blocking_error:
+            self.settings_error_label.setText(self._generation_blocking_error)
+        else:
+            self.settings_error_label.clear()
+
+        if self.worker and self.worker.isRunning():
+            return
+
+        self.generate_button.setEnabled(not self._generation_blocking_error)
+        self.save_button.setEnabled(self.settings_panel.is_valid)
+
+    def _on_settings_panel_validation_changed(
+        self,
+        _is_valid: bool,
+        _error_message: str,
+    ) -> None:
+        self.retranslate_ui()
+        self._refresh_validation_state()
+
+    def _on_raw_apply_finished(self, success: bool, error_message: str) -> None:
+        if success:
+            self._refresh_validation_state()
+            return
+
+        QMessageBox.warning(
+            self,
+            self._t("ui_msgbox_title_config_error"),
+            self._build_actionable_settings_error(error_message),
+        )
+
     def save_config(self) -> bool:
-        if not self.config_path:
+        if not self.settings_path:
             self.append_log(self._t("ui_log_no_config_path"))
             return False
-        self.config_editor.save_to_config(self.config)
+
+        if not self.settings_panel.is_valid:
+            QMessageBox.warning(
+                self,
+                self._t("ui_msgbox_title_config_error"),
+                self._build_actionable_settings_error(
+                    self.settings_panel.validation_error
+                ),
+            )
+            return False
+
         try:
-            with self.config_path.open("w", encoding="utf-8") as config_file:
-                self.config.write(config_file)
-        except OSError as exc:
-            self.append_log(self._t("ui_log_save_failed", error=str(exc)))
+            save_settings(self.settings_path, self.settings)
+        except SettingsStoreError as exc:
+            error_message = self._format_settings_store_error(self.settings_path, exc)
+            self.append_log(error_message)
             QMessageBox.critical(
                 self,
                 self._t("ui_msgbox_title_save_failed"),
-                self._t("ui_msgbox_body_save_failed", error=str(exc)),
+                error_message,
             )
             return False
-        self.append_log(self._t("ui_log_config_saved", path=str(self.config_path)))
+
+        self._settings_file_error = ""
+        self._register_profile_path(self.settings_path)
+        self._set_current_profile_path(self.settings_path)
+        self.append_log(self._t("ui_log_config_saved", path=str(self.settings_path)))
+        self._refresh_validation_state()
         return True
 
     def on_save_clicked(self) -> None:
-        valid, error_message = self.config_editor.validate()
-        if not valid:
-            QMessageBox.warning(
-                self, self._t("ui_msgbox_title_config_error"), error_message
-            )
-            return
         self.save_config()
+
+    def _on_profile_combo_changed(self, selected_path: str) -> None:
+        path_text = selected_path.strip()
+        if not path_text:
+            return
+
+        candidate = Path(path_text)
+        if candidate == self.settings_path:
+            return
+
+        self.switch_settings_profile(candidate)
+
+    def on_open_profile_clicked(self) -> None:
+        selected_path = self._choose_settings_profile_file()
+        if not selected_path:
+            return
+
+        self.switch_settings_profile(selected_path)
+
+    def on_save_as_profile_clicked(self) -> None:
+        selected_path = self._choose_settings_profile_save_path()
+        if not selected_path:
+            return
+
+        previous_path = self.settings_path
+        self.settings_path = selected_path
+        self.config_path = selected_path
+        self._register_profile_path(selected_path)
+        self._set_current_profile_path(selected_path)
+
+        if self.save_config():
+            return
+
+        self.settings_path = previous_path
+        self.config_path = previous_path
+        self._set_current_profile_path(previous_path)
+        self._refresh_validation_state()
+
+    def _register_profile_path(self, path: Path) -> None:
+        profile_text = str(path)
+        if self.settings_profile_combo.findText(profile_text) != -1:
+            return
+        self.settings_profile_combo.addItem(profile_text)
+
+    def _set_current_profile_path(self, path: Path) -> None:
+        profile_text = str(path)
+        if self.settings_profile_combo.findText(profile_text) == -1:
+            self.settings_profile_combo.addItem(profile_text)
+
+        blocker = QSignalBlocker(self.settings_profile_combo)
+        try:
+            self.settings_profile_combo.setCurrentText(profile_text)
+        finally:
+            del blocker
+
+    def _choose_settings_profile_file(self) -> Path | None:
+        start_dir = str(self.settings_path.parent)
+        selected_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            self._t_or_default(
+                "ui_dialog_title_choose_settings_file", "Select settings profile"
+            ),
+            start_dir,
+            self._t("ui_file_filter_json"),
+        )
+        selected_text = selected_path.strip()
+        if not selected_text:
+            return None
+        return Path(selected_text)
+
+    def _choose_settings_profile_save_path(self) -> Path | None:
+        start_path = str(self.settings_path)
+        selected_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            self._t_or_default(
+                "ui_dialog_title_save_settings_file", "Save settings profile"
+            ),
+            start_path,
+            self._t("ui_file_filter_json"),
+        )
+        selected_text = selected_path.strip()
+        if not selected_text:
+            return None
+
+        profile_path = Path(selected_text)
+        if profile_path.suffix.lower() != ".json":
+            profile_path = profile_path.with_suffix(".json")
+        return profile_path
 
     def _choose_save_file(self) -> str:
         save_path, _selected_filter = QFileDialog.getOpenFileName(
@@ -258,12 +595,19 @@ class MainWindow(QMainWindow):
         return save_path.strip()
 
     def _set_generation_controls(self, generating: bool) -> None:
-        self.generate_button.setEnabled(not generating)
-        self.save_button.setEnabled(not generating)
-        self.config_editor.language_combo.setEnabled(not generating)
-        self.generate_button.setText(
-            self._t("ui_btn_generating") if generating else self._t("ui_btn_generate")
-        )
+        self.settings_panel.setEnabled(not generating)
+        self.settings_profile_combo.setEnabled(not generating)
+        self.open_profile_button.setEnabled(not generating)
+        self.save_as_profile_button.setEnabled(not generating)
+
+        if generating:
+            self.generate_button.setEnabled(False)
+            self.save_button.setEnabled(False)
+            self.generate_button.setText(self._t("ui_btn_generating"))
+            return
+
+        self.retranslate_ui()
+        self._refresh_validation_state()
 
     def _start_generation_worker(self, save_path: str, country_id: int | None) -> None:
         self._selected_save_path = save_path
@@ -272,7 +616,13 @@ class MainWindow(QMainWindow):
         self.log_output.clear()
         self.progress_bar.setValue(0)
 
-        self.worker = GenerationWorker(str(self.config_path))
+        if self.application_path is None:
+            self.worker = GenerationWorker(self.settings.model_copy(deep=True))
+        else:
+            self.worker = GenerationWorker(
+                self.settings.model_copy(deep=True),
+                application_root=self.application_path,
+            )
         self.worker.save_path = save_path
         self.worker.country_id = country_id
         self.worker.log_message.connect(self.on_log_message)
@@ -309,10 +659,11 @@ class MainWindow(QMainWindow):
         return label_to_country.get(selected_label)
 
     def on_generate_clicked(self) -> None:
-        valid, error_message = self.config_editor.validate()
-        if not valid:
+        if self._generation_blocking_error:
             QMessageBox.warning(
-                self, self._t("ui_msgbox_title_config_error"), error_message
+                self,
+                self._t("ui_msgbox_title_config_error"),
+                self._generation_blocking_error,
             )
             return
 
@@ -332,7 +683,6 @@ class MainWindow(QMainWindow):
         resolved_outcome = self._coerce_generation_outcome(outcome, legacy_message)
 
         self._set_generation_controls(False)
-        self.progress_bar.setValue(100 if resolved_outcome.success else 0)
         if self.worker:
             self.worker.wait()
             self.worker.deleteLater()
@@ -361,6 +711,21 @@ class MainWindow(QMainWindow):
                 self,
                 self._t("ui_msgbox_title_done"),
                 self._t("ui_msgbox_body_generation_done"),
+            )
+        elif resolved_outcome.code == GenerationOutcomeCode.CANCELLED:
+            QMessageBox.information(
+                self,
+                self._t("ui_msgbox_title_cancelled"),
+                self._t("ui_msgbox_body_generation_cancelled"),
+            )
+        elif resolved_outcome.code == GenerationOutcomeCode.INCOMPLETE:
+            details = resolved_outcome.message.strip()
+            if not details:
+                details = self._t("ui_worker_generation_incomplete")
+            QMessageBox.warning(
+                self,
+                self._t("ui_msgbox_title_incomplete"),
+                self._t("ui_msgbox_body_generation_incomplete", details=details),
             )
         else:
             if resolved_outcome.code == GenerationOutcomeCode.UNSUPPORTED_SAVE_FORMAT:

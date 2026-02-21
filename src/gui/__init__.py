@@ -4,22 +4,52 @@ This project uses a flat import model (src/ on sys.path). We keep runtime path
 resolution here to avoid divergent behaviors between dev and frozen builds.
 """
 
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+from PyQt6.QtCore import QStandardPaths
 from PyQt6.QtWidgets import QApplication
 
-from gui.config_editor import ConfigEditor
-from gui.generation_worker import GenerationWorker
-from gui.main_window import MainWindow
+if TYPE_CHECKING:
+    from gui.generation_worker import GenerationWorker as GenerationWorker
+    from gui.main_window import MainWindow as MainWindow
 
 
 @dataclass(frozen=True)
 class RuntimePaths:
     application_path: Path
-    config_path: Path
+    settings_path: Path
+
+
+def _default_settings_path() -> Path:
+    app_config_root = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppConfigLocation
+    ).strip()
+    if app_config_root:
+        base_dir = Path(app_config_root)
+    else:
+        base_dir = Path.home() / ".config"
+
+    if base_dir.name.lower() != "dynamic-technology-tree":
+        base_dir = base_dir / "dynamic-technology-tree"
+
+    return base_dir / "settings.json"
+
+
+def __getattr__(name: str) -> Any:
+    if name == "GenerationWorker":
+        from gui.generation_worker import GenerationWorker as imported
+
+        globals()[name] = imported
+        return imported
+    if name == "MainWindow":
+        from gui.main_window import MainWindow as imported
+
+        globals()[name] = imported
+        return imported
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _find_project_root(start: Path) -> Path | None:
@@ -30,45 +60,22 @@ def _find_project_root(start: Path) -> Path | None:
 
 
 def _resolve_runtime_paths() -> RuntimePaths:
-    """Resolve application root and default config.ini path.
+    settings_path = _default_settings_path()
 
-    - Frozen builds: next to the executable.
-    - Source/dev: prefer CWD if it already contains config.ini; otherwise prefer
-      a detected project root; final fallback is CWD.
-
-    Note: the generator writes outputs to relative paths (e.g. ./localisation),
-    so the resolved application_path is also used as CWD.
-    """
     frozen = getattr(sys, "frozen", False)
     if frozen:
         app_path = Path(sys.executable).resolve().parent
-        return RuntimePaths(
-            application_path=app_path, config_path=app_path / "config.ini"
-        )
-
-    cwd = Path.cwd()
-    if (cwd / "config.ini").exists():
-        return RuntimePaths(application_path=cwd, config_path=cwd / "config.ini")
+        return RuntimePaths(application_path=app_path, settings_path=settings_path)
 
     project_root = _find_project_root(Path(__file__).resolve())
     if project_root is not None:
-        return RuntimePaths(
-            application_path=project_root, config_path=project_root / "config.ini"
-        )
+        return RuntimePaths(application_path=project_root, settings_path=settings_path)
 
-    return RuntimePaths(application_path=cwd, config_path=cwd / "config.ini")
-
-
-def _safe_chdir(target: Path) -> None:
-    try:
-        os.chdir(target)
-    except OSError as exc:
-        print(f"Warning: failed to set working directory to '{target}': {exc}")
+    return RuntimePaths(application_path=Path.cwd(), settings_path=settings_path)
 
 
 def main() -> int:
     paths = _resolve_runtime_paths()
-    _safe_chdir(paths.application_path)
 
     app = QApplication(sys.argv)
 
@@ -78,9 +85,13 @@ def main() -> int:
     if load_fonts():
         set_default_font(app)
 
-    window = MainWindow(config_path=str(paths.config_path))
+    window_cls = getattr(sys.modules[__name__], "MainWindow")
+    window = window_cls(
+        config_path=str(paths.settings_path),
+        application_path=paths.application_path,
+    )
     window.show()
     return app.exec()
 
 
-__all__ = ["ConfigEditor", "GenerationWorker", "MainWindow", "main"]
+__all__ = ["GenerationWorker", "MainWindow", "main"]

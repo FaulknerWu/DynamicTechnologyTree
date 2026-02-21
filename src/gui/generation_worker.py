@@ -1,18 +1,25 @@
 from __future__ import annotations
 
-import configparser
 import traceback
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from threading import Event
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from dtt_core.events import EventKind, EventSink, GenerationEvent, StageId
-from dtt_core.sav_reader import SaveReaderError, load_save_context
+from dtt_core.load_order_resolver import LoadOrderResolutionError
+from dtt_core.prepared_run import AmbiguousPlayerEmpireError
+from dtt_core.sav_reader import SaveReaderError
 from dtt_core.save_context import SaveContext
-from gui.i18n import LOCALIZATION_STRINGS, default_language_from_system, t
+from dtt_core.settings_snapshot import require_settings_snapshot
+from dtt_core.typed_error import TypedCoreError
+from gui.i18n import t
+from localization import LOCALIZATION_STRINGS
+from settings import Settings, require_supported_language
 
 
 class GenerationOutcomeCode(str, Enum):
@@ -35,6 +42,26 @@ class GenerationOutcome:
         return self.code == GenerationOutcomeCode.SUCCESS
 
 
+_LOAD_ORDER_ERROR_KEYS: dict[str, str] = {
+    "missing_database_path": "ui_error_launcher_db_missing_database_path",
+    "empty_database_path": "ui_error_launcher_db_empty_database_path",
+    "missing_database": "ui_error_launcher_db_missing_database",
+    "database_not_file": "ui_error_launcher_db_not_a_file",
+    "database_locked": "ui_error_launcher_db_locked",
+    "open_failed": "ui_error_launcher_db_open_failed",
+    "read_failed": "ui_error_launcher_db_read_failed",
+    "corrupt_database": "ui_error_launcher_db_corrupt",
+    "database_error": "ui_error_launcher_db_query_failed",
+    "schema_playsets_missing": "ui_error_launcher_db_schema_missing_table",
+    "schema_playsets_mods_missing": "ui_error_launcher_db_schema_missing_table",
+    "schema_mods_missing": "ui_error_launcher_db_schema_missing_table",
+    "schema_playsets_columns": "ui_error_launcher_db_schema_missing_columns",
+    "schema_playsets_mods_columns": "ui_error_launcher_db_schema_missing_columns",
+    "schema_mods_columns": "ui_error_launcher_db_schema_missing_columns",
+    "no_active_playset": "ui_error_launcher_db_no_active_playset",
+}
+
+
 class _QtEventSink(EventSink):
     def __init__(self, emit_event: Callable[[GenerationEvent], None]) -> None:
         self._emit_event = emit_event
@@ -49,63 +76,129 @@ class GenerationWorker(QThread):
     generation_event = pyqtSignal(object)
     finished = pyqtSignal(object)
 
-    def __init__(self, config_path: str, parent=None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        application_root: Path | str | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
-        self.config_path = config_path
+        self._settings_snapshot = require_settings_snapshot(settings)
+        self._application_root = (
+            Path(application_root) if application_root is not None else None
+        )
         self.save_path: str | None = None
         self.country_id: int | None = None
         self._cancelled = Event()
         self._progress_value = 0
-        self._saw_generation_done = False
+        self._final_done_event: GenerationEvent | None = None
 
     def run(self) -> None:
-        lang = self._ui_language()
-        if self._cancelled.is_set():
-            self._emit_finished(
-                GenerationOutcomeCode.CANCELLED,
-                t("ui_worker_generation_cancelled", lang),
-            )
-            return
-
-        save_path = (self.save_path or "").strip()
-        if not save_path:
-            self._emit_finished(
-                GenerationOutcomeCode.ERROR,
-                "save_path is required and cannot be empty",
-            )
-            return
-
         try:
-            save_context = self._inspect_save_context(save_path)
-            candidates = tuple(sorted(save_context.player_country_candidates))
-            if self.country_id is None and len(candidates) > 1:
+            lang = self._ui_language()
+            if self._cancelled.is_set():
                 self._emit_finished(
-                    GenerationOutcomeCode.AMBIGUOUS_COUNTRY_SELECTION,
-                    empire_options=tuple(
-                        self._build_ambiguous_empire_options(save_context)
-                    ),
+                    GenerationOutcomeCode.CANCELLED,
+                    t("ui_worker_generation_cancelled", lang),
                 )
                 return
 
-            selected_country_id = self.country_id
-            if selected_country_id is None and len(candidates) == 1:
-                selected_country_id = candidates[0]
-
-            if self._run_generator(save_path=save_path, country_id=selected_country_id):
-                self._emit_finished(GenerationOutcomeCode.SUCCESS)
-            else:
+            save_path = (self.save_path or "").strip()
+            if not save_path:
                 self._emit_finished(
-                    GenerationOutcomeCode.INCOMPLETE,
-                    t("ui_worker_generation_incomplete", lang),
+                    GenerationOutcomeCode.ERROR,
+                    "save_path is required and cannot be empty",
                 )
+                return
+
+            try:
+                generation_completed = self._run_generator(
+                    save_path=save_path,
+                    country_id=self.country_id,
+                )
+            except AmbiguousPlayerEmpireError as exc:
+                self._emit_finished(
+                    GenerationOutcomeCode.AMBIGUOUS_COUNTRY_SELECTION,
+                    empire_options=tuple(
+                        self._build_ambiguous_empire_options(exc.save_context)
+                    ),
+                )
+                return
+            except LoadOrderResolutionError as exc:
+                self._emit_finished(
+                    GenerationOutcomeCode.ERROR,
+                    self._localize_load_order_error(exc, lang),
+                )
+                return
+            except TypedCoreError as exc:
+                if exc.code == "technology_swap_collision":
+                    self._emit_finished(
+                        GenerationOutcomeCode.ERROR,
+                        t("ui_error_technology_swap_collision", lang, **exc.details_dict()),
+                    )
+                    return
+                self._emit_finished(
+                    GenerationOutcomeCode.ERROR,
+                    self._unknown_error_code_message(exc.code),
+                )
+                return
+
+            resolved_done_event = self._final_done_event
+            done_details = dict(resolved_done_event.details) if resolved_done_event else {}
+            outcome_code = str(done_details.get("outcome_code", "")).strip().lower()
+
+            if outcome_code == GenerationOutcomeCode.SUCCESS.value:
+                self._emit_finished(GenerationOutcomeCode.SUCCESS)
+                return
+
+            if outcome_code == GenerationOutcomeCode.CANCELLED.value:
+                self._emit_finished(
+                    GenerationOutcomeCode.CANCELLED,
+                    t("ui_worker_generation_cancelled", lang),
+                )
+                return
+
+            if outcome_code == GenerationOutcomeCode.ERROR.value:
+                message = (resolved_done_event.message if resolved_done_event else "").strip()
+                if not message:
+                    message = t("ui_msgbox_body_generation_failed", lang, error="unknown error")
+                self._emit_finished(GenerationOutcomeCode.ERROR, message)
+                return
+
+            if outcome_code == GenerationOutcomeCode.INCOMPLETE.value or not generation_completed:
+                message = t("ui_worker_generation_incomplete", lang)
+                failed_paths = str(done_details.get("artifact_failed_paths", "")).strip()
+                if failed_paths:
+                    message = f"{message}\n{failed_paths}"
+                self._emit_finished(GenerationOutcomeCode.INCOMPLETE, message)
+                return
+
+            # Legacy fallback: treat DONE/100 as success.
+            self._emit_finished(GenerationOutcomeCode.SUCCESS)
         except SaveReaderError as exc:
             self._emit_finished(GenerationOutcomeCode.UNSUPPORTED_SAVE_FORMAT, str(exc))
         except Exception as exc:  # pragma: no cover - GUI error handling
             self.log_message.emit(traceback.format_exc().rstrip())
             self._emit_finished(GenerationOutcomeCode.ERROR, str(exc))
 
-    def _inspect_save_context(self, save_path: str) -> SaveContext:
-        return load_save_context(save_path)
+    @staticmethod
+    def _unknown_error_code_message(code: str) -> str:
+        return f"Unknown error code: {code}"
+
+    def _localize_load_order_error(
+        self,
+        exc: LoadOrderResolutionError,
+        lang: str,
+    ) -> str:
+        key = _LOAD_ORDER_ERROR_KEYS.get(exc.code)
+        if not key:
+            return self._unknown_error_code_message(exc.code)
+
+        english = LOCALIZATION_STRINGS.get("english", {})
+        if key not in english:
+            return self._unknown_error_code_message(exc.code)
+
+        return t(key, lang, **exc.details_dict())
 
     def _build_ambiguous_empire_options(
         self, save_context: SaveContext
@@ -121,41 +214,26 @@ class GenerationWorker(QThread):
     def _run_generator(self, *, save_path: str, country_id: int | None) -> bool:
         from generator import TechTreeGenerator
 
-        generator = TechTreeGenerator(self.config_path)
+        if self._application_root is None:
+            generator = TechTreeGenerator(settings=self._settings_snapshot)
+        else:
+            generator = TechTreeGenerator(
+                settings=self._settings_snapshot,
+                application_root=self._application_root,
+            )
         self._progress_value = 0
-        self._saw_generation_done = False
+        self._final_done_event = None
         generator.run_generation_process(
             save_path=save_path,
             country_id=country_id,
             event_sink=_QtEventSink(self._handle_generation_event),
+            cancel_event=self._cancelled,
         )
 
-        return self._saw_generation_done
+        return self._is_successful_done_event(self._final_done_event)
 
     def _ui_language(self) -> str:
-        """Return a best-effort GUI language key derived from config.ini.
-
-        Prefer the user's configured Stellaris language when valid; otherwise fall
-        back to a system-derived UI language.
-        """
-
-        fallback = default_language_from_system()
-        try:
-            parser = configparser.ConfigParser()
-            read_files = parser.read(self.config_path, encoding="utf-8-sig")
-            if not read_files:
-                return fallback
-
-            candidate = (
-                parser.get("localization", "language", fallback="").strip().lower()
-            )
-            if not candidate:
-                return fallback
-            if candidate not in LOCALIZATION_STRINGS:
-                return fallback
-            return candidate
-        except Exception:
-            return fallback
+        return require_supported_language(self._settings_snapshot.localization.language)
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -176,12 +254,21 @@ class GenerationWorker(QThread):
         }:
             self.log_message.emit(event.message)
 
-        if (
-            event.stage_id == StageId.DONE
-            and event.kind == EventKind.PROGRESS
-            and event.progress == 100
-        ):
-            self._saw_generation_done = True
+        if event.stage_id == StageId.DONE:
+            self._final_done_event = event
+
+    @staticmethod
+    def _is_successful_done_event(event: GenerationEvent | None) -> bool:
+        if event is None:
+            return False
+
+        details = dict(event.details)
+        outcome_code = str(details.get("outcome_code", "")).strip().lower()
+        if outcome_code:
+            return outcome_code == GenerationOutcomeCode.SUCCESS.value
+
+        # Legacy fallback: DONE/100% implies success.
+        return event.kind == EventKind.PROGRESS and event.progress == 100
 
     def _emit_finished(
         self,

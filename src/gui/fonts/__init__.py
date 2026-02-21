@@ -1,12 +1,11 @@
 """Font loading utilities for the GUI application."""
 
 from pathlib import Path
-from typing import Optional
 
 from PyQt6.QtGui import QFont, QFontDatabase
 from PyQt6.QtWidgets import QApplication
 
-_loaded_font_family: Optional[str] = None
+_loaded_font_family: str | None = None
 
 
 def load_fonts() -> bool:
