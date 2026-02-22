@@ -53,6 +53,8 @@ Desktop.ini
 /config.ini
 .claude/
 .sisyphus/
+/.codex/
+/openspec/
 
 # Generated output (repo-root only)
 /localisation/
