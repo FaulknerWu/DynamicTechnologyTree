@@ -5,7 +5,11 @@ from pathlib import Path
 from threading import Event
 from collections.abc import Iterable, Sequence
 
-from config import DEFAULT_DECODE_REPLACEMENT_ENCODING, DecodeFailurePolicy
+from config import (
+    DEFAULT_DECODE_REPLACEMENT_ENCODING,
+    DEFAULT_LOCALISATION_REPLACE_PREFIX,
+    DecodeFailurePolicy,
+)
 from dtt_core.file_decode import (
     DEFAULT_FAILURE_POLICY,
     DEFAULT_FALLBACK_ENCODINGS,
@@ -16,7 +20,6 @@ from dtt_core.file_decode import (
 from dtt_core.source_manifest import normalize_manifest_path
 
 _HEADER_PREFIX = "l_"
-_REPLACE_PATH_PREFIX = "localisation/replace"
 
 
 @dataclass(frozen=True)
@@ -476,9 +479,9 @@ def _is_replace_localisation_path(path_value: str) -> bool:
     if not normalized:
         return False
 
-    if normalized == _REPLACE_PATH_PREFIX:
+    if normalized == DEFAULT_LOCALISATION_REPLACE_PREFIX:
         return True
-    if normalized.startswith(f"{_REPLACE_PATH_PREFIX}/"):
+    if normalized.startswith(f"{DEFAULT_LOCALISATION_REPLACE_PREFIX}/"):
         return True
 
     parts = normalized.split("/")

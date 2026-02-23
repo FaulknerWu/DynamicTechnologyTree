@@ -9,6 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from collections.abc import Iterable, Mapping
 
+from config import (
+    DEFAULT_ELIGIBILITY_SAMPLE_SIZE,
+    DEFAULT_ELIGIBILITY_UNKNOWN_WARNING_THRESHOLD,
+)
 from dtt_core.tech_merge import MergedTechDefinition
 from dtt_core.trigger_evaluator import (
     EmpireProfile,
@@ -16,9 +20,6 @@ from dtt_core.trigger_evaluator import (
     TriggerEvaluator,
 )
 from models import Technology
-
-_DEFAULT_SAMPLE_SIZE = 5
-_DEFAULT_UNKNOWN_WARNING_THRESHOLD = 1
 
 
 @dataclass(frozen=True)
@@ -65,7 +66,7 @@ class PrerequisiteExclusionExample:
 
 @dataclass
 class EligibilityReport:
-    sample_size: int = _DEFAULT_SAMPLE_SIZE
+    sample_size: int = DEFAULT_ELIGIBILITY_SAMPLE_SIZE
     excluded_by_false: dict[str, FalseExclusionDetail] = field(default_factory=dict)
     excluded_by_unknown: dict[str, UnknownExclusionDetail] = field(default_factory=dict)
     excluded_by_prereq: dict[str, PrerequisiteExclusionDetail] = field(
@@ -192,8 +193,8 @@ def build_allowed_tech_ids_for_empire(
     merged_tech_definitions: Mapping[str, MergedTechDefinition] | None = None,
     *,
     evaluator: TriggerEvaluator | None = None,
-    sample_size: int = _DEFAULT_SAMPLE_SIZE,
-    unknown_warning_threshold: int = _DEFAULT_UNKNOWN_WARNING_THRESHOLD,
+    sample_size: int = DEFAULT_ELIGIBILITY_SAMPLE_SIZE,
+    unknown_warning_threshold: int = DEFAULT_ELIGIBILITY_UNKNOWN_WARNING_THRESHOLD,
 ) -> tuple[set[str], EligibilityReport]:
     normalized_sample_size = max(sample_size, 0)
     merged_lookup = merged_tech_definitions or {}

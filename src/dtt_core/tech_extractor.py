@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dtt_core.clausewitz_parser import Assignment, Atom, Block, ClausewitzNode, parse
+from dtt_core.clausewitz_text import _atom_text
 
 
 @dataclass(frozen=True)
@@ -117,12 +118,6 @@ class TechExtractor:
             potential=potential,
             technology_swaps=swaps if saw_swaps else None,
         )
-
-
-def _atom_text(node: ClausewitzNode) -> str | None:
-    if isinstance(node, Atom):
-        return node.token.value
-    return None
 
 
 def _atom_int(node: ClausewitzNode) -> int | None:

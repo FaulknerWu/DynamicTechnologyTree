@@ -14,6 +14,10 @@ from config import (
     DEFAULT_DECODE_FALLBACK_ENCODINGS,
     DEFAULT_DECODE_PREFERRED_ENCODINGS,
     DEFAULT_DECODE_REPLACEMENT_ENCODING,
+    DEFAULT_DISPLAY_MAX_CHILDREN_PER_NODE,
+    DEFAULT_DISPLAY_MAX_DISPLAY_NODES,
+    DEFAULT_DISPLAY_MAX_PREREQ_DISPLAY,
+    DEFAULT_DISPLAY_MAX_TREE_DEPTH,
     DEFAULT_ELIGIBILITY_SAMPLE_SIZE,
     DEFAULT_ELIGIBILITY_UNKNOWN_WARNING_THRESHOLD,
     DEFAULT_INGESTION_DIAGNOSTIC_EXAMPLE_LIMIT,
@@ -22,6 +26,9 @@ from config import (
     DEFAULT_LOCALISATION_ROOT,
     DEFAULT_MULTI_ACTIVE_PLAYSET_SELECTION_POLICY,
     DEFAULT_OVERLONG_TREE_ROOT_LOG_LIMIT,
+    DEFAULT_SAVE_READER_MAX_MEMBER_UNCOMPRESSED_SIZE_BYTES,
+    DEFAULT_SAVE_READER_MAX_PARSE_DIAGNOSTICS_PER_MEMBER,
+    DEFAULT_SAVE_READER_MAX_TOTAL_UNCOMPRESSED_SIZE_BYTES,
     DEFAULT_TECHNOLOGY_GLOB,
     DEFAULT_TECHNOLOGY_ROOT,
     DEFAULT_YML_OUTPUT_TARGETS,
@@ -354,7 +361,7 @@ class LocalizationSettings(_StrictModel):
 
 class DisplaySettings(_StrictModel):
     max_children_per_node: int = Field(
-        default=12,
+        default=DEFAULT_DISPLAY_MAX_CHILDREN_PER_NODE,
         ge=0,
         le=999,
         json_schema_extra=_ui_meta(
@@ -365,7 +372,7 @@ class DisplaySettings(_StrictModel):
         ),
     )
     max_tree_depth: int = Field(
-        default=4,
+        default=DEFAULT_DISPLAY_MAX_TREE_DEPTH,
         ge=0,
         le=99,
         json_schema_extra=_ui_meta(
@@ -376,7 +383,7 @@ class DisplaySettings(_StrictModel):
         ),
     )
     max_display_nodes: int = Field(
-        default=128,
+        default=DEFAULT_DISPLAY_MAX_DISPLAY_NODES,
         ge=0,
         le=9999,
         json_schema_extra=_ui_meta(
@@ -387,7 +394,7 @@ class DisplaySettings(_StrictModel):
         ),
     )
     max_prereq_display: int = Field(
-        default=2,
+        default=DEFAULT_DISPLAY_MAX_PREREQ_DISPLAY,
         ge=0,
         le=99,
         json_schema_extra=_ui_meta(
@@ -480,7 +487,7 @@ _MAX_INT32 = (2**31) - 1
 
 class SaveReaderSettings(_StrictModel):
     max_member_uncompressed_size_bytes: int = Field(
-        default=256 * 1024 * 1024,
+        default=DEFAULT_SAVE_READER_MAX_MEMBER_UNCOMPRESSED_SIZE_BYTES,
         ge=0,
         le=_MAX_INT32,
         json_schema_extra=_ui_meta(
@@ -491,7 +498,7 @@ class SaveReaderSettings(_StrictModel):
         ),
     )
     max_total_uncompressed_size_bytes: int = Field(
-        default=512 * 1024 * 1024,
+        default=DEFAULT_SAVE_READER_MAX_TOTAL_UNCOMPRESSED_SIZE_BYTES,
         ge=0,
         le=_MAX_INT32,
         json_schema_extra=_ui_meta(
@@ -502,7 +509,7 @@ class SaveReaderSettings(_StrictModel):
         ),
     )
     max_parse_diagnostics_per_member: int = Field(
-        default=20,
+        default=DEFAULT_SAVE_READER_MAX_PARSE_DIAGNOSTICS_PER_MEMBER,
         ge=0,
         le=1000,
         json_schema_extra=_ui_meta(

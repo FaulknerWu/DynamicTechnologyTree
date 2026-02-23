@@ -35,18 +35,6 @@ class SettingsStoreError(Exception):
         self.line = line
         self.column = column
 
-    def to_dict(self) -> dict[str, Any]:
-        details: dict[str, Any] = {"kind": self.kind}
-        if self.path is not None:
-            details["path"] = list(self.path)
-        if self.pydantic_errors is not None:
-            details["pydantic_errors"] = self.pydantic_errors
-        if self.line is not None:
-            details["line"] = self.line
-        if self.column is not None:
-            details["column"] = self.column
-        return {"message": self.message, "details": details}
-
 
 def load_settings(path: str | Path) -> Settings:
     settings_path = Path(path)

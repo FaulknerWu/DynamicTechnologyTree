@@ -14,6 +14,7 @@ from dtt_core.clausewitz_parser import (
     TokenKind,
     parse,
 )
+from dtt_core.clausewitz_text import _atom_text
 from dtt_core.file_decode import (
     DEFAULT_FAILURE_POLICY,
     DEFAULT_FALLBACK_ENCODINGS,
@@ -107,14 +108,6 @@ class ModDescriptorLoader:
             replacement_encoding=replacement_encoding,
             on_failure=on_failure,
         )
-
-
-def _atom_text(node: ClausewitzNode) -> str | None:
-    if not isinstance(node, Atom):
-        return None
-    if node.token.kind in (TokenKind.BARE, TokenKind.STRING):
-        return node.token.value
-    return None
 
 
 def _extract_dependencies(node: ClausewitzNode) -> list[str]:

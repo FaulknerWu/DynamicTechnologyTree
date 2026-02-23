@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from settings import Settings
+from settings_schema_ref import resolve_schema_ref
 
 SUPPORTED_SCHEMA_SUBSET: tuple[str, ...] = (
     "boolean",
@@ -363,7 +364,7 @@ def _collect_leaf_fields(
     path: tuple[str, ...] = (),
 ) -> list[_FieldSchema]:
     root = root_schema or schema_node
-    resolved = _resolve_ref(schema_node, root)
+    resolved = resolve_schema_ref(schema_node, root, strict=True)
 
     node_type = resolved.get("type")
     if node_type == "object":
@@ -403,29 +404,6 @@ def _collect_leaf_fields(
         f"'{_path_to_key(path)}' with type '{node_type}'. "
         f"Supported subset: {', '.join(SUPPORTED_SCHEMA_SUBSET)}"
     )
-
-
-def _resolve_ref(node: dict[str, Any], root_schema: dict[str, Any]) -> dict[str, Any]:
-    ref = node.get("$ref")
-    if not isinstance(ref, str):
-        return node
-
-    prefix = "#/$defs/"
-    if not ref.startswith(prefix):
-        raise ValueError(f"Unsupported $ref format: {ref}")
-
-    defs = root_schema.get("$defs")
-    if not isinstance(defs, dict):
-        raise ValueError("Schema is missing $defs for $ref resolution")
-
-    target_name = ref[len(prefix) :]
-    target = defs.get(target_name)
-    if not isinstance(target, dict):
-        raise ValueError(f"Schema $ref target not found: {target_name}")
-
-    merged = dict(target)
-    merged.update({key: value for key, value in node.items() if key != "$ref"})
-    return merged
 
 
 def _build_editor(field: _FieldSchema) -> _EditorBundle:

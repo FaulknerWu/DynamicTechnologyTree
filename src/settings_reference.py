@@ -10,19 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-
-def _resolve_ref(node: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
-    ref = node.get("$ref")
-    if not isinstance(ref, str):
-        return node
-    prefix = "#/$defs/"
-    if not ref.startswith(prefix):
-        return node
-    defs = root.get("$defs", {})
-    target = defs.get(ref[len(prefix) :], {})
-    merged = dict(target)
-    merged.update({k: v for k, v in node.items() if k != "$ref"})
-    return merged
+from settings_schema_ref import resolve_schema_ref
 
 
 def _iter_leaf_fields(
@@ -31,7 +19,7 @@ def _iter_leaf_fields(
     root: dict[str, Any],
     path: tuple[str, ...] = (),
 ) -> list[tuple[tuple[str, ...], dict[str, Any]]]:
-    resolved = _resolve_ref(schema_node, root)
+    resolved = resolve_schema_ref(schema_node, root, strict=False)
     if resolved.get("type") == "object":
         props = resolved.get("properties")
         if not isinstance(props, dict):

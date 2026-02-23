@@ -4,6 +4,11 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import (
+    DEFAULT_SAVE_READER_MAX_MEMBER_UNCOMPRESSED_SIZE_BYTES,
+    DEFAULT_SAVE_READER_MAX_PARSE_DIAGNOSTICS_PER_MEMBER,
+    DEFAULT_SAVE_READER_MAX_TOTAL_UNCOMPRESSED_SIZE_BYTES,
+)
 from dtt_core.clausewitz_parser import (
     Assignment,
     Atom,
@@ -12,11 +17,13 @@ from dtt_core.clausewitz_parser import (
     Diagnostic,
     parse,
 )
+from dtt_core.clausewitz_text import _atom_text
 from dtt_core.file_decode import (
     DEFAULT_FALLBACK_ENCODINGS,
     PREFERRED_ENCODINGS,
     DecodeDiagnostics,
     format_decode_warning,
+    _ordered_unique_encodings,
 )
 from dtt_core.save_context import SaveContext, SaveEmpireFacts, SaveParseReport
 
@@ -25,9 +32,15 @@ REQUIRED_SAVE_MEMBERS: tuple[str, str] = ("meta", "gamestate")
 
 @dataclass(frozen=True)
 class SaveReaderLimits:
-    max_member_uncompressed_size_bytes: int = 256 * 1024 * 1024
-    max_total_uncompressed_size_bytes: int = 512 * 1024 * 1024
-    max_parse_diagnostics_per_member: int = 20
+    max_member_uncompressed_size_bytes: int = (
+        DEFAULT_SAVE_READER_MAX_MEMBER_UNCOMPRESSED_SIZE_BYTES
+    )
+    max_total_uncompressed_size_bytes: int = (
+        DEFAULT_SAVE_READER_MAX_TOTAL_UNCOMPRESSED_SIZE_BYTES
+    )
+    max_parse_diagnostics_per_member: int = (
+        DEFAULT_SAVE_READER_MAX_PARSE_DIAGNOSTICS_PER_MEMBER
+    )
 
     def __post_init__(self) -> None:
         if self.max_member_uncompressed_size_bytes < 0:
@@ -622,12 +635,6 @@ def _parse_country_id(raw: str) -> int | None:
         return None
 
 
-def _atom_text(node: ClausewitzNode) -> str | None:
-    if isinstance(node, Atom):
-        return node.token.value
-    return None
-
-
 def _atom_int(node: ClausewitzNode) -> int | None:
     text = _atom_text(node)
     if text is None:
@@ -674,15 +681,3 @@ def _sorted_unique_tokens(values: list[str]) -> tuple[str, ...]:
         if folded not in unique_by_folded:
             unique_by_folded[folded] = cleaned
     return tuple(sorted(unique_by_folded.values(), key=str.casefold))
-
-
-def _ordered_unique_encodings(encodings: tuple[str, ...]) -> tuple[str, ...]:
-    ordered: list[str] = []
-    seen: set[str] = set()
-    for encoding in encodings:
-        normalized = encoding.strip().lower()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        ordered.append(normalized)
-    return tuple(ordered)
