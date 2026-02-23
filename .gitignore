@@ -51,6 +51,7 @@ Desktop.ini
 
 # Project specific
 /config.ini
+uv.lock
 .claude/
 .sisyphus/
 /.codex/
