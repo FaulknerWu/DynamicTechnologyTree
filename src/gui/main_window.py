@@ -39,7 +39,7 @@ from settings_store import SettingsStoreError, load_settings, save_settings
 class MainWindow(QMainWindow):
     def __init__(
         self,
-        config_path: str | os.PathLike[str] | None = None,
+        settings_path: str | os.PathLike[str] | None = None,
         application_path: str | os.PathLike[str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -47,11 +47,8 @@ class MainWindow(QMainWindow):
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setMinimumSize(700, 500)
 
-        self.settings_path = (
-            Path(config_path) if config_path else _default_settings_path()
-        )
+        self.settings_path = Path(settings_path) if settings_path else _default_settings_path()
         self.application_path = Path(application_path) if application_path else None
-        self.config_path = self.settings_path
         self.settings = Settings()
         self.setWindowTitle(t("ui_app_title", self._current_lang()))
 
@@ -264,7 +261,6 @@ class MainWindow(QMainWindow):
             error_message = self._format_ini_not_supported_error(target_path)
             self._settings_file_error = error_message
             self.settings_path = previous_path
-            self.config_path = previous_path
             self._set_current_profile_path(previous_path)
             self._refresh_validation_state()
             QMessageBox.warning(
@@ -281,7 +277,6 @@ class MainWindow(QMainWindow):
                 error_message = self._format_settings_store_error(target_path, exc)
                 self._settings_file_error = error_message
                 self.settings_path = previous_path
-                self.config_path = previous_path
                 self._set_current_profile_path(previous_path)
                 self._refresh_validation_state()
                 QMessageBox.warning(
@@ -299,7 +294,6 @@ class MainWindow(QMainWindow):
             self.append_log(self._t("ui_log_config_not_found", path=str(target_path)))
 
         self.settings_path = target_path
-        self.config_path = target_path
         self._register_profile_path(target_path)
         self._set_current_profile_path(target_path)
         self.settings_panel.refresh_from_settings()
@@ -522,7 +516,6 @@ class MainWindow(QMainWindow):
 
         previous_path = self.settings_path
         self.settings_path = selected_path
-        self.config_path = selected_path
         self._register_profile_path(selected_path)
         self._set_current_profile_path(selected_path)
 
@@ -530,7 +523,6 @@ class MainWindow(QMainWindow):
             return
 
         self.settings_path = previous_path
-        self.config_path = previous_path
         self._set_current_profile_path(previous_path)
         self._refresh_validation_state()
 
@@ -679,8 +671,24 @@ class MainWindow(QMainWindow):
     def on_log_message(self, message: str) -> None:
         self.log_output.append(message)
 
-    def on_generation_finished(self, outcome: object, legacy_message: str = "") -> None:
-        resolved_outcome = self._coerce_generation_outcome(outcome, legacy_message)
+    def on_generation_finished(self, outcome: object) -> None:
+        if not isinstance(outcome, GenerationOutcome):
+            QMessageBox.critical(
+                self,
+                self._t("ui_msgbox_title_error"),
+                self._t(
+                    "ui_msgbox_body_generation_failed",
+                    error=f"内部错误：未知的生成结果类型 {type(outcome)!r}: {outcome!r}",
+                ),
+            )
+            self._set_generation_controls(False)
+            if self.worker:
+                self.worker.wait()
+                self.worker.deleteLater()
+                self.worker = None
+            return
+
+        resolved_outcome = outcome
 
         self._set_generation_controls(False)
         if self.worker:
@@ -748,25 +756,6 @@ class MainWindow(QMainWindow):
                 self._t("ui_msgbox_title_error"),
                 self._t("ui_msgbox_body_generation_failed", error=error_message),
             )
-
-    def _coerce_generation_outcome(
-        self, outcome: object, legacy_message: str
-    ) -> GenerationOutcome:
-        if isinstance(outcome, GenerationOutcome):
-            return outcome
-
-        if isinstance(outcome, bool):
-            if outcome:
-                return GenerationOutcome(code=GenerationOutcomeCode.SUCCESS)
-            return GenerationOutcome(
-                code=GenerationOutcomeCode.ERROR,
-                message=str(legacy_message),
-            )
-
-        if isinstance(outcome, str):
-            return GenerationOutcome(code=GenerationOutcomeCode.ERROR, message=outcome)
-
-        return GenerationOutcome(code=GenerationOutcomeCode.ERROR, message=str(outcome))
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         if a0 is None:

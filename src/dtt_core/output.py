@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 from config import (
     DEFAULT_ELIGIBILITY_SAMPLE_SIZE,
@@ -48,6 +48,430 @@ class ArtifactWriteSummary:
 class OutputWriteResult:
     eligibility_report: EligibilityReport
     artifact_summary: ArtifactWriteSummary
+
+
+@dataclass(frozen=True)
+class OutputPathFailure:
+    raw_target: str
+    error: Exception
+
+
+def plan_output_file_paths(
+    *,
+    localisation_root: Path,
+    yml_targets: Sequence[object],
+    lang_code: str,
+    filename: str,
+) -> tuple[list[Path], list[OutputPathFailure]]:
+    candidates: list[Path] = []
+    failures: list[OutputPathFailure] = []
+
+    for template in yml_targets:
+        raw = "" if template is None else str(template).strip()
+        try:
+            formatted = raw.format(lang_code=lang_code)
+        except Exception as exc:
+            failures.append(OutputPathFailure(raw_target=raw, error=exc))
+            continue
+
+        rel = Path(formatted) if formatted else Path("")
+        if rel.is_absolute() or ".." in rel.parts:
+            failures.append(
+                OutputPathFailure(
+                    raw_target=raw,
+                    error=ValueError(
+                        "output target must be relative and cannot contain '..': "
+                        f"{raw!r}"
+                    ),
+                )
+            )
+            continue
+
+        candidates.append(localisation_root / rel / filename)
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        unique.append(path)
+        seen.add(path)
+    return unique, failures
+
+
+@dataclass(frozen=True)
+class PlannedTextFile:
+    path: Path
+    content: str
+    encoding: str
+
+
+@dataclass(frozen=True)
+class OutputPlan:
+    planned_files: tuple[PlannedTextFile, ...]
+    eligibility_report: EligibilityReport
+    swap_resolution_report: SwapResolutionReport
+    missing_description_count: int
+    target_failures: tuple[OutputPathFailure, ...]
+    lang_code: str
+
+
+class _OutputPlanBuilder:
+    def __init__(
+        self,
+        *,
+        all_technologies: Mapping[str, Technology],
+        tech_descriptions: Mapping[str, Mapping[str, str]],
+        config,
+        generate_tech_tree_content: Callable[..., str],
+        merged_tech_definitions: Mapping[str, MergedTechDefinition],
+        trigger_evaluator: TriggerEvaluator,
+        empire_profile: EmpireProfile,
+        localisation_root: Path,
+        yml_targets: Sequence[object],
+        yml_encoding: str,
+        report_encoding: str,
+    ) -> None:
+        self._all_technologies = all_technologies
+        self._tech_descriptions = tech_descriptions
+        self._config = config
+        self._generate_tech_tree_content = generate_tech_tree_content
+        self._merged_tech_definitions = merged_tech_definitions
+        self._trigger_evaluator = trigger_evaluator
+        self._empire_profile = empire_profile
+        self._localisation_root = localisation_root
+        self._yml_targets = yml_targets
+        self._yml_encoding = yml_encoding
+        self._report_encoding = report_encoding
+
+    def build_plan(self) -> OutputPlan:
+        allowed_tech_ids, eligibility_report = self._build_allowed_tech_ids()
+        display_overrides, swap_resolution_report = self._build_display_overrides()
+
+        planned_files: list[PlannedTextFile] = []
+        target_failures: list[OutputPathFailure] = []
+
+        lang_code = self._config.localization.target_language_code
+        lang_key = self._config.target_lang_key
+
+        main_files, main_failures = self._plan_main_tree_files(
+            lang_code=lang_code,
+            lang_key=lang_key,
+            allowed_tech_ids=allowed_tech_ids,
+            display_overrides=display_overrides,
+        )
+        planned_files.extend(main_files)
+        target_failures.extend(main_failures)
+
+        replaced_files, replaced_failures, missing_description_count = (
+            self._plan_replaced_description_files(
+                lang_code=lang_code,
+                lang_key=lang_key,
+                allowed_tech_ids=allowed_tech_ids,
+                display_overrides=display_overrides,
+            )
+        )
+        planned_files.extend(replaced_files)
+        target_failures.extend(replaced_failures)
+
+        report_file = self._plan_save_report_file(
+            eligibility_report=eligibility_report,
+            swap_resolution_report=swap_resolution_report,
+        )
+        planned_files.append(report_file)
+
+        return OutputPlan(
+            planned_files=tuple(planned_files),
+            eligibility_report=eligibility_report,
+            swap_resolution_report=swap_resolution_report,
+            missing_description_count=missing_description_count,
+            target_failures=tuple(target_failures),
+            lang_code=lang_code,
+        )
+
+    def _build_allowed_tech_ids(self) -> tuple[set[str], EligibilityReport]:
+        output = getattr(self._config, "output", None)
+        sample_size = getattr(
+            output,
+            "eligibility_sample_size",
+            DEFAULT_ELIGIBILITY_SAMPLE_SIZE,
+        )
+        unknown_warning_threshold = getattr(
+            output,
+            "eligibility_unknown_warning_threshold",
+            DEFAULT_ELIGIBILITY_UNKNOWN_WARNING_THRESHOLD,
+        )
+        return build_allowed_tech_ids_for_empire(
+            self._all_technologies,
+            self._empire_profile,
+            self._merged_tech_definitions,
+            evaluator=self._trigger_evaluator,
+            sample_size=sample_size,
+            unknown_warning_threshold=unknown_warning_threshold,
+        )
+
+    def _build_display_overrides(self) -> tuple[dict[str, str], SwapResolutionReport]:
+        return resolve_display_overrides_for_profile(
+            self._merged_tech_definitions,
+            self._empire_profile,
+            evaluator=self._trigger_evaluator,
+        )
+
+    def _active_display_id(
+        self,
+        base_tech_id: str,
+        display_overrides: Mapping[str, str],
+    ) -> str:
+        return display_overrides.get(base_tech_id, base_tech_id)
+
+    def _lookup_description(self, tech_id: str, lang_code: str) -> str:
+        if tech_id not in self._tech_descriptions:
+            return ""
+        return str(self._tech_descriptions[tech_id].get(lang_code, ""))
+
+    def _plan_yml_file_targets(
+        self,
+        *,
+        lang_code: str,
+        filename: str,
+    ) -> tuple[list[Path], list[OutputPathFailure]]:
+        return plan_output_file_paths(
+            localisation_root=self._localisation_root,
+            yml_targets=self._yml_targets,
+            lang_code=lang_code,
+            filename=filename,
+        )
+
+    def _plan_main_tree_files(
+        self,
+        *,
+        lang_code: str,
+        lang_key: str,
+        allowed_tech_ids: set[str],
+        display_overrides: Mapping[str, str],
+    ) -> tuple[list[PlannedTextFile], list[OutputPathFailure]]:
+        file_paths, failures = self._plan_yml_file_targets(
+            lang_code=lang_code,
+            filename=f"zztechtreemain_l_{lang_code}.yml",
+        )
+        lang_config = LOCALIZATION_STRINGS.get(
+            lang_code, LOCALIZATION_STRINGS["english"]
+        )
+        lines = [
+            f"{lang_key}:",
+            f' technology_tree_title:0 "{lang_config["title"]}"',
+            f' tech_tree_max_level:0 "{lang_config["top_level"]}"',
+        ]
+
+        for tech_id in sorted(allowed_tech_ids):
+            tree_content = self._generate_tech_tree_content(
+                tech_id,
+                lang_code,
+                display_overrides=display_overrides,
+                allowed_tech_ids=allowed_tech_ids,
+            )
+            if not tree_content:
+                continue
+
+            active_id = self._active_display_id(tech_id, display_overrides)
+            lines.append(f' {active_id}_techtree:0 "{tree_content}"')
+
+        content = "\n".join(lines)
+        planned = [
+            PlannedTextFile(
+                path=path,
+                content=content,
+                encoding=self._yml_encoding,
+            )
+            for path in file_paths
+        ]
+        return planned, failures
+
+    def _plan_replaced_description_files(
+        self,
+        *,
+        lang_code: str,
+        lang_key: str,
+        allowed_tech_ids: set[str],
+        display_overrides: Mapping[str, str],
+    ) -> tuple[list[PlannedTextFile], list[OutputPathFailure], int]:
+        file_paths, failures = self._plan_yml_file_targets(
+            lang_code=lang_code,
+            filename=f"zztechtreereplaced_l_{lang_code}.yml",
+        )
+        lines = [f"{lang_key}:"]
+        missing_descriptions: list[str] = []
+        lang_config = LOCALIZATION_STRINGS.get(
+            lang_code, LOCALIZATION_STRINGS["english"]
+        )
+
+        for tech_id in sorted(allowed_tech_ids):
+            tech = self._all_technologies.get(tech_id)
+            if tech is None:
+                continue
+
+            active_id = self._active_display_id(tech_id, display_overrides)
+            tech_desc = self._lookup_description(active_id, lang_code)
+            if not tech_desc and active_id != tech_id:
+                tech_desc = self._lookup_description(tech_id, lang_code)
+            if not tech_desc:
+                missing_descriptions.append(active_id)
+
+            tier_text = f"{lang_config['tier_label']}{tech.tier_level}"
+
+            tree_content = f"${active_id}_techtree$"
+            if tech_desc:
+                full_desc = f"{tech_desc}({tier_text}){tree_content}"
+            else:
+                full_desc = f"({tier_text}){tree_content}"
+            lines.append(f' {active_id}_desc:0 "{full_desc}"')
+
+        content = "\n".join(lines)
+        planned = [
+            PlannedTextFile(
+                path=path,
+                content=content,
+                encoding=self._yml_encoding,
+            )
+            for path in file_paths
+        ]
+        return planned, failures, len(missing_descriptions)
+
+    def _sorted_unknown_predicate_frequency(
+        self,
+        eligibility_report: EligibilityReport,
+    ):
+        return sorted(
+            eligibility_report.unknown_predicate_frequency.items(),
+            key=lambda item: (-item[1].count, item[0]),
+        )
+
+    def _plan_save_report_file(
+        self,
+        *,
+        eligibility_report: EligibilityReport,
+        swap_resolution_report: SwapResolutionReport,
+    ) -> PlannedTextFile:
+        report_path = self._localisation_root / "dtt-save-report.txt"
+        lines = [
+            "dtt-save-report",
+            f"profile_mode: {self._empire_profile.mode}",
+            f"profile_name: {self._empire_profile.name}",
+            "",
+            "eligibility_counts:",
+            f"excluded_by_false: {eligibility_report.excluded_by_false_count}",
+            f"excluded_by_unknown: {eligibility_report.excluded_by_unknown_count}",
+            f"excluded_by_prereq: {eligibility_report.excluded_by_prereq_count}",
+            "",
+            "unknown_predicate_frequency_top:",
+        ]
+
+        unknown_predicate_frequency = self._sorted_unknown_predicate_frequency(
+            eligibility_report
+        )
+        if not unknown_predicate_frequency:
+            lines.append("none")
+        else:
+            for predicate, frequency in unknown_predicate_frequency:
+                example_tech_ids = ", ".join(frequency.example_tech_ids) or "-"
+                lines.append(
+                    f"- {predicate}: count={frequency.count}; "
+                    f"examples={example_tech_ids}"
+                )
+
+        lines.extend(["", "swap_ambiguities:"])
+        lines.append(f"count: {len(swap_resolution_report.ambiguities)}")
+        if not swap_resolution_report.ambiguities:
+            lines.append("none")
+        else:
+            for tech_id in sorted(swap_resolution_report.ambiguities):
+                ambiguity = swap_resolution_report.ambiguities[tech_id]
+                unknown_predicates = ", ".join(ambiguity.unknown_predicates) or "-"
+                lines.append(
+                    f"- tech_id={tech_id}; swap_index={ambiguity.swap_index}; "
+                    f"unknown_preds={unknown_predicates}"
+                )
+
+        report_content = "\n".join(lines) + "\n"
+        return PlannedTextFile(
+            path=report_path,
+            content=report_content,
+            encoding=self._report_encoding,
+        )
+
+
+class _OutputPlanWriter:
+    def __init__(
+        self,
+        *,
+        config,
+        localize: Callable[..., str],
+        emit: Callable[..., None],
+        artifact_summary: ArtifactWriteSummary,
+        cancel_event: Event | None,
+    ) -> None:
+        self._config = config
+        self._localize = localize
+        self._emit = emit
+        self._artifact_summary = artifact_summary
+        self._cancel_event = cancel_event
+
+    def write_plan(self, plan: OutputPlan) -> None:
+        for planned in plan.planned_files:
+            if self._is_cancelled():
+                return
+            self._write_text_file(planned.path, planned.content, encoding=planned.encoding)
+
+    def _is_cancelled(self) -> bool:
+        return self._cancel_event is not None and self._cancel_event.is_set()
+
+    def _write_text_file(self, file_path: Path, content: str, *, encoding: str) -> None:
+        output = getattr(self._config, "output", None)
+        on_write_error = getattr(output, "on_write_error", "warn_and_continue")
+        on_existing_file = getattr(output, "on_existing_file", "overwrite")
+
+        try:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            if on_existing_file != "overwrite" and file_path.exists():
+                if on_existing_file == "skip":
+                    self._artifact_summary.skipped.append(file_path)
+                    return
+                if on_existing_file == "fail":
+                    raise FileExistsError(
+                        f"refusing to overwrite existing file: {file_path}"
+                    )
+
+            with file_path.open("w", encoding=encoding, newline="\n") as handle:
+                handle.write(content)
+            self._artifact_summary.written.append(file_path)
+            self._emit(
+                EventKind.ARTIFACT,
+                "",
+                artifact_path=str(file_path),
+            )
+        except OSError as exc:
+            self._artifact_summary.failed.append(
+                ArtifactWriteFailure(
+                    path=file_path,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+            )
+            failure_kind = (
+                EventKind.ERROR if on_write_error == "fail_fast" else EventKind.WARNING
+            )
+            self._emit(
+                failure_kind,
+                self._localize("warn_write_file_failed", file=file_path, error=exc),
+                details=(
+                    ("file", str(file_path)),
+                    ("error_type", type(exc).__name__),
+                    ("error", str(exc)),
+                ),
+            )
+            if on_write_error == "fail_fast":
+                raise
 
 
 class OutputWriter:
@@ -122,331 +546,61 @@ class OutputWriter:
             )
         )
 
-    def _write_text_file(self, file_path: Path, content: str, *, encoding: str) -> None:
+    def generate_all_yml_files(self) -> OutputWriteResult:
+        self.artifact_summary = ArtifactWriteSummary()
         output = getattr(self.config, "output", None)
+        yml_targets = getattr(output, "yml_targets", DEFAULT_YML_OUTPUT_TARGETS)
+        yml_encoding = getattr(output, "yml_encoding", "utf-8-sig")
+        report_encoding = getattr(output, "report_encoding", "utf-8")
         on_write_error = getattr(output, "on_write_error", "warn_and_continue")
-        on_existing_file = getattr(output, "on_existing_file", "overwrite")
 
-        try:
-            file_path.parent.mkdir(parents=True, exist_ok=True)
+        builder = _OutputPlanBuilder(
+            all_technologies=self.all_technologies,
+            tech_descriptions=self.tech_descriptions,
+            config=self.config,
+            generate_tech_tree_content=self.generate_tech_tree_content,
+            merged_tech_definitions=self.merged_tech_definitions,
+            trigger_evaluator=self.trigger_evaluator,
+            empire_profile=self.empire_profile,
+            localisation_root=self._localisation_root(),
+            yml_targets=yml_targets,
+            yml_encoding=yml_encoding,
+            report_encoding=report_encoding,
+        )
+        plan = builder.build_plan()
+        self.eligibility_report = plan.eligibility_report
+        self.swap_resolution_report = plan.swap_resolution_report
 
-            if on_existing_file != "overwrite" and file_path.exists():
-                if on_existing_file == "skip":
-                    self.artifact_summary.skipped.append(file_path)
-                    return
-                if on_existing_file == "fail":
-                    raise FileExistsError(
-                        f"refusing to overwrite existing file: {file_path}"
-                    )
-
-            with file_path.open("w", encoding=encoding, newline="\n") as handle:
-                handle.write(content)
-            self.artifact_summary.written.append(file_path)
+        for failure in plan.target_failures:
             self._emit(
-                EventKind.ARTIFACT,
-                "",
-                artifact_path=str(file_path),
-            )
-        except OSError as e:
-            self.artifact_summary.failed.append(
-                ArtifactWriteFailure(
-                    path=file_path,
-                    error_type=type(e).__name__,
-                    error=str(e),
-                )
-            )
-            failure_kind = (
-                EventKind.ERROR if on_write_error == "fail_fast" else EventKind.WARNING
-            )
-            self._emit(
-                failure_kind,
-                self._localize("warn_write_file_failed", file=file_path, error=e),
-                details=(
-                    ("file", str(file_path)),
-                    ("error_type", type(e).__name__),
-                    ("error", str(e)),
+                EventKind.WARNING,
+                self._localize(
+                    "warn_write_file_failed",
+                    file=failure.raw_target or "<empty target>",
+                    error=failure.error,
                 ),
             )
             if on_write_error == "fail_fast":
-                raise
+                raise failure.error
 
-    def _get_output_file_paths(self, lang_code: str, filename: str):
-        base = self._localisation_root()
-
-        output = getattr(self.config, "output", None)
-        templates = getattr(output, "yml_targets", DEFAULT_YML_OUTPUT_TARGETS)
-        on_write_error = getattr(output, "on_write_error", "warn_and_continue")
-
-        candidates: list[Path] = []
-        for template in templates:
-            raw = "" if template is None else str(template).strip()
-            try:
-                formatted = raw.format(lang_code=lang_code)
-            except Exception as e:
-                self._emit(
-                    EventKind.WARNING,
-                    self._localize(
-                        "warn_write_file_failed",
-                        file=raw or "<empty target>",
-                        error=e,
-                    ),
-                )
-                if on_write_error == "fail_fast":
-                    raise
-                continue
-
-            rel = Path(formatted) if formatted else Path("")
-            if rel.is_absolute() or ".." in rel.parts:
-                error = ValueError(
-                    f"output target must be relative and cannot contain '..': {raw!r}"
-                )
-                self._emit(
-                    EventKind.WARNING,
-                    self._localize(
-                        "warn_write_file_failed",
-                        file=raw or "<empty target>",
-                        error=error,
-                    ),
-                )
-                if on_write_error == "fail_fast":
-                    raise error
-                continue
-
-            candidates.append(base / rel / filename)
-        unique = []
-        seen: set[Path] = set()
-        for p in candidates:
-            if p not in seen:
-                unique.append(p)
-                seen.add(p)
-        return unique
-
-    def _lookup_description(self, tech_id: str, lang_code: str) -> str:
-        if tech_id not in self.tech_descriptions:
-            return ""
-        return self.tech_descriptions[tech_id].get(lang_code, "")
-
-    def _active_display_id(
-        self,
-        base_tech_id: str,
-        display_overrides: Mapping[str, str],
-    ) -> str:
-        return display_overrides.get(base_tech_id, base_tech_id)
-
-    def _build_allowed_tech_ids(self) -> set[str]:
-        output = getattr(self.config, "output", None)
-        sample_size = getattr(
-            output,
-            "eligibility_sample_size",
-            DEFAULT_ELIGIBILITY_SAMPLE_SIZE,
-        )
-        unknown_warning_threshold = getattr(
-            output,
-            "eligibility_unknown_warning_threshold",
-            DEFAULT_ELIGIBILITY_UNKNOWN_WARNING_THRESHOLD,
-        )
-        allowed_tech_ids, report = build_allowed_tech_ids_for_empire(
-            self.all_technologies,
-            self.empire_profile,
-            self.merged_tech_definitions,
-            evaluator=self.trigger_evaluator,
-            sample_size=sample_size,
-            unknown_warning_threshold=unknown_warning_threshold,
-        )
-        self.eligibility_report = report
-        return allowed_tech_ids
-
-    def _build_display_overrides(self) -> dict[str, str]:
-        display_overrides, report = resolve_display_overrides_for_profile(
-            self.merged_tech_definitions,
-            self.empire_profile,
-            evaluator=self.trigger_evaluator,
-        )
-        self.swap_resolution_report = report
-        return display_overrides
-
-    def _sorted_unknown_predicate_frequency(self):
-        return sorted(
-            self.eligibility_report.unknown_predicate_frequency.items(),
-            key=lambda item: (-item[1].count, item[0]),
-        )
-
-    def _write_save_report(self) -> None:
-        if self._is_cancelled():
-            return
-        report_path = self._localisation_root() / "dtt-save-report.txt"
-        lines = [
-            "dtt-save-report",
-            f"profile_mode: {self.empire_profile.mode}",
-            f"profile_name: {self.empire_profile.name}",
-            "",
-            "eligibility_counts:",
-            f"excluded_by_false: {self.eligibility_report.excluded_by_false_count}",
-            f"excluded_by_unknown: {self.eligibility_report.excluded_by_unknown_count}",
-            f"excluded_by_prereq: {self.eligibility_report.excluded_by_prereq_count}",
-            "",
-            "unknown_predicate_frequency_top:",
-        ]
-
-        unknown_predicate_frequency = self._sorted_unknown_predicate_frequency()
-        if not unknown_predicate_frequency:
-            lines.append("none")
-        else:
-            for predicate, frequency in unknown_predicate_frequency:
-                example_tech_ids = ", ".join(frequency.example_tech_ids) or "-"
-                lines.append(
-                    f"- {predicate}: count={frequency.count}; "
-                    f"examples={example_tech_ids}"
-                )
-
-        lines.extend(["", "swap_ambiguities:"])
-        lines.append(f"count: {len(self.swap_resolution_report.ambiguities)}")
-        if not self.swap_resolution_report.ambiguities:
-            lines.append("none")
-        else:
-            for tech_id in sorted(self.swap_resolution_report.ambiguities):
-                ambiguity = self.swap_resolution_report.ambiguities[tech_id]
-                unknown_predicates = ", ".join(ambiguity.unknown_predicates) or "-"
-                lines.append(
-                    f"- tech_id={tech_id}; swap_index={ambiguity.swap_index}; "
-                    f"unknown_preds={unknown_predicates}"
-                )
-
-        report_content = "\n".join(lines) + "\n"
-
-        output = getattr(self.config, "output", None)
-        encoding = getattr(output, "report_encoding", "utf-8")
-        self._write_text_file(report_path, report_content, encoding=encoding)
-
-    def _generate_localization_files_for_language(self, lang_code: str, lang_key: str):
-        allowed_tech_ids = self._build_allowed_tech_ids()
-        if self._is_cancelled():
-            return
-        display_overrides = self._build_display_overrides()
-        if self._is_cancelled():
-            return
-        self._generate_main_tech_tree_file(
-            lang_code,
-            lang_key,
-            allowed_tech_ids,
-            display_overrides,
-        )
-        if self._is_cancelled():
-            return
-        self._generate_tech_description_replacement_file(
-            lang_code,
-            lang_key,
-            allowed_tech_ids,
-            display_overrides,
-        )
-        if self._is_cancelled():
-            return
-        self._write_save_report()
-
-    def _generate_main_tech_tree_file(
-        self,
-        lang_code: str,
-        lang_key: str,
-        allowed_tech_ids: set[str],
-        display_overrides: Mapping[str, str],
-    ):
-        file_paths = self._get_output_file_paths(
-            lang_code,
-            f"zztechtreemain_l_{lang_code}.yml",
-        )
-        lang_config = LOCALIZATION_STRINGS.get(
-            lang_code, LOCALIZATION_STRINGS["english"]
-        )
-        lines = [
-            f"{lang_key}:",
-            f' technology_tree_title:0 "{lang_config["title"]}"',
-            f' tech_tree_max_level:0 "{lang_config["top_level"]}"',
-        ]
-
-        for tech_id in sorted(allowed_tech_ids):
-            tree_content = self.generate_tech_tree_content(
-                tech_id,
-                lang_code,
-                display_overrides=display_overrides,
-                allowed_tech_ids=allowed_tech_ids,
-            )
-            if not tree_content:
-                continue
-
-            active_id = self._active_display_id(tech_id, display_overrides)
-            lines.append(f' {active_id}_techtree:0 "{tree_content}"')
-
-        content = "\n".join(lines)
-        for file_path in file_paths:
-            if self._is_cancelled():
-                return
-            output = getattr(self.config, "output", None)
-            encoding = getattr(output, "yml_encoding", "utf-8-sig")
-            self._write_text_file(file_path, content, encoding=encoding)
-
-    def _generate_tech_description_replacement_file(
-        self,
-        lang_code: str,
-        lang_key: str,
-        allowed_tech_ids: set[str],
-        display_overrides: Mapping[str, str],
-    ):
-        file_paths = self._get_output_file_paths(
-            lang_code,
-            f"zztechtreereplaced_l_{lang_code}.yml",
-        )
-        lines = [f"{lang_key}:"]
-        missing_descriptions = []
-        lang_config = LOCALIZATION_STRINGS.get(
-            lang_code, LOCALIZATION_STRINGS["english"]
-        )
-
-        for tech_id in sorted(allowed_tech_ids):
-            tech = self.all_technologies.get(tech_id)
-            if tech is None:
-                continue
-
-            active_id = self._active_display_id(tech_id, display_overrides)
-            tech_desc = self._lookup_description(active_id, lang_code)
-            if not tech_desc and active_id != tech_id:
-                tech_desc = self._lookup_description(tech_id, lang_code)
-            if not tech_desc:
-                missing_descriptions.append(active_id)
-
-            tier_text = f"{lang_config['tier_label']}{tech.tier_level}"
-
-            tree_content = f"${active_id}_techtree$"
-            if tech_desc:
-                full_desc = f"{tech_desc}({tier_text}){tree_content}"
-            else:
-                full_desc = f"({tier_text}){tree_content}"
-            lines.append(f' {active_id}_desc:0 "{full_desc}"')
-
-        if missing_descriptions and len(missing_descriptions) > 0:
+        if plan.missing_description_count > 0:
             self._emit(
                 EventKind.WARNING,
                 self._localize(
                     "warn_missing_descriptions",
-                    lang=lang_code,
-                    count=len(missing_descriptions),
+                    lang=plan.lang_code,
+                    count=plan.missing_description_count,
                 ),
             )
-        content = "\n".join(lines)
-        for file_path in file_paths:
-            if self._is_cancelled():
-                return
-            output = getattr(self.config, "output", None)
-            encoding = getattr(output, "yml_encoding", "utf-8-sig")
-            self._write_text_file(file_path, content, encoding=encoding)
 
-    def generate_all_yml_files(self) -> OutputWriteResult:
-        self.artifact_summary = ArtifactWriteSummary()
-        output_dir = self._localisation_root()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        lang_code = self.config.localization.target_language_code
-        self._generate_localization_files_for_language(
-            lang_code, self.config.target_lang_key
+        writer = _OutputPlanWriter(
+            config=self.config,
+            localize=self._localize,
+            emit=self._emit,
+            artifact_summary=self.artifact_summary,
+            cancel_event=self._cancel_event,
         )
+        writer.write_plan(plan)
         return OutputWriteResult(
             eligibility_report=self.eligibility_report,
             artifact_summary=self.artifact_summary,

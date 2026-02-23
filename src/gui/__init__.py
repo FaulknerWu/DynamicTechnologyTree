@@ -87,7 +87,7 @@ def main() -> int:
 
     window_cls = getattr(sys.modules[__name__], "MainWindow")
     window = window_cls(
-        config_path=str(paths.settings_path),
+        settings_path=str(paths.settings_path),
         application_path=paths.application_path,
     )
     window.show()

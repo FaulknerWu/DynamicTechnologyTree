@@ -15,6 +15,7 @@ from dtt_core.stats import StatsReporter
 from dtt_core.stdout_event_sink import StdoutEventSink
 from dtt_core.tech_merge import MergedTechDefinition
 from dtt_core.trigger_evaluator import EmpireProfile
+from dtt_core.run_outcome import RunOutcome
 from localization import LOCALIZATION_STRINGS, RESEARCH_AREA_ICONS
 from models import Technology
 from settings import Settings
@@ -87,15 +88,6 @@ class TechTreeGenerator:
             self._emit_overlong_tree_roots,
             event_sink=self._event_sink,
         )
-
-    @classmethod
-    def from_settings(
-        cls,
-        settings: Settings | None,
-        *,
-        application_root: Path | str | None = None,
-    ) -> "TechTreeGenerator":
-        return cls(settings=settings, application_root=application_root)
 
     def _l(self, key: str, **kwargs) -> str:
         lang_code = self.config.localization.target_language_code
@@ -244,9 +236,6 @@ class TechTreeGenerator:
             allowed_tech_ids,
         )
 
-    def _get_output_file_paths(self, lang_code: str, filename: str):
-        return self._output_writer._get_output_file_paths(lang_code, filename)
-
     def generate_all_yml_files(self):
         return self._output_writer.generate_all_yml_files()
 
@@ -267,8 +256,8 @@ class TechTreeGenerator:
         country_id: int | None = None,
         event_sink: EventSink | None = None,
         cancel_event: Event | None = None,
-    ):
-        self.run_generation_process_with_settings(
+    ) -> RunOutcome:
+        return self.run_generation_process_with_settings(
             save_path=save_path,
             settings=self._settings_snapshot,
             country_id=country_id,
@@ -284,28 +273,16 @@ class TechTreeGenerator:
         country_id: int | None = None,
         event_sink: EventSink | None = None,
         cancel_event: Event | None = None,
-    ):
+    ) -> RunOutcome:
         self._set_event_sink(event_sink)
         self._set_cancel_event(cancel_event)
         use_case = self._build_generate_localization_use_case()
         try:
-            use_case.run_with_settings(
+            return use_case.run_with_settings(
                 settings=settings,
                 save_path=save_path,
                 country_id=country_id,
                 cancel_event=cancel_event,
             )
-        except Exception as e:
-            try:
-                error_message = self._l("error_generation_exception", error=e)
-            except Exception:
-                error_message = f"Generation error: {e}"
-            self._emit_event(
-                StageId.DONE,
-                EventKind.ERROR,
-                error_message,
-                details=(("error_type", type(e).__name__),),
-            )
-            raise
         finally:
             self._set_cancel_event(None)

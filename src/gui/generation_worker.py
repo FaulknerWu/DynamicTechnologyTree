@@ -10,13 +10,12 @@ from collections.abc import Callable
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from dtt_core.events import EventKind, EventSink, GenerationEvent, StageId
-from dtt_core.load_order_resolver import LoadOrderResolutionError
+from dtt_core.events import EventKind, EventSink, GenerationEvent
 from dtt_core.prepared_run import AmbiguousPlayerEmpireError
+from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
 from dtt_core.sav_reader import SaveReaderError
 from dtt_core.save_context import SaveContext
 from dtt_core.settings_snapshot import require_settings_snapshot
-from dtt_core.typed_error import TypedCoreError
 from gui.i18n import t
 from localization import LOCALIZATION_STRINGS
 from settings import Settings, require_supported_language
@@ -91,7 +90,6 @@ class GenerationWorker(QThread):
         self.country_id: int | None = None
         self._cancelled = Event()
         self._progress_value = 0
-        self._final_done_event: GenerationEvent | None = None
 
     def run(self) -> None:
         try:
@@ -112,7 +110,7 @@ class GenerationWorker(QThread):
                 return
 
             try:
-                generation_completed = self._run_generator(
+                core_outcome = self._run_generator(
                     save_path=save_path,
                     country_id=self.country_id,
                 )
@@ -124,57 +122,36 @@ class GenerationWorker(QThread):
                     ),
                 )
                 return
-            except LoadOrderResolutionError as exc:
-                self._emit_finished(
-                    GenerationOutcomeCode.ERROR,
-                    self._localize_load_order_error(exc, lang),
-                )
-                return
-            except TypedCoreError as exc:
-                if exc.code == "technology_swap_collision":
-                    self._emit_finished(
-                        GenerationOutcomeCode.ERROR,
-                        t("ui_error_technology_swap_collision", lang, **exc.details_dict()),
-                    )
-                    return
-                self._emit_finished(
-                    GenerationOutcomeCode.ERROR,
-                    self._unknown_error_code_message(exc.code),
-                )
-                return
 
-            resolved_done_event = self._final_done_event
-            done_details = dict(resolved_done_event.details) if resolved_done_event else {}
-            outcome_code = str(done_details.get("outcome_code", "")).strip().lower()
-
-            if outcome_code == GenerationOutcomeCode.SUCCESS.value:
+            if core_outcome.code == RunOutcomeCode.SUCCESS:
                 self._emit_finished(GenerationOutcomeCode.SUCCESS)
                 return
 
-            if outcome_code == GenerationOutcomeCode.CANCELLED.value:
+            if core_outcome.code == RunOutcomeCode.CANCELLED:
                 self._emit_finished(
                     GenerationOutcomeCode.CANCELLED,
                     t("ui_worker_generation_cancelled", lang),
                 )
                 return
 
-            if outcome_code == GenerationOutcomeCode.ERROR.value:
-                message = (resolved_done_event.message if resolved_done_event else "").strip()
-                if not message:
-                    message = t("ui_msgbox_body_generation_failed", lang, error="unknown error")
-                self._emit_finished(GenerationOutcomeCode.ERROR, message)
+            if core_outcome.code == RunOutcomeCode.ERROR:
+                self._emit_finished(
+                    GenerationOutcomeCode.ERROR,
+                    self._localize_core_error(core_outcome, lang),
+                )
                 return
 
-            if outcome_code == GenerationOutcomeCode.INCOMPLETE.value or not generation_completed:
-                message = t("ui_worker_generation_incomplete", lang)
-                failed_paths = str(done_details.get("artifact_failed_paths", "")).strip()
-                if failed_paths:
-                    message = f"{message}\n{failed_paths}"
-                self._emit_finished(GenerationOutcomeCode.INCOMPLETE, message)
+            if core_outcome.code == RunOutcomeCode.INCOMPLETE:
+                self._emit_finished(
+                    GenerationOutcomeCode.INCOMPLETE,
+                    self._format_incomplete_message(core_outcome, lang),
+                )
                 return
 
-            # Legacy fallback: treat DONE/100 as success.
-            self._emit_finished(GenerationOutcomeCode.SUCCESS)
+            self._emit_finished(
+                GenerationOutcomeCode.ERROR,
+                f"内部错误：未知的运行结果 {core_outcome.code!r}",
+            )
         except SaveReaderError as exc:
             self._emit_finished(GenerationOutcomeCode.UNSUPPORTED_SAVE_FORMAT, str(exc))
         except Exception as exc:  # pragma: no cover - GUI error handling
@@ -184,21 +161,6 @@ class GenerationWorker(QThread):
     @staticmethod
     def _unknown_error_code_message(code: str) -> str:
         return f"Unknown error code: {code}"
-
-    def _localize_load_order_error(
-        self,
-        exc: LoadOrderResolutionError,
-        lang: str,
-    ) -> str:
-        key = _LOAD_ORDER_ERROR_KEYS.get(exc.code)
-        if not key:
-            return self._unknown_error_code_message(exc.code)
-
-        english = LOCALIZATION_STRINGS.get("english", {})
-        if key not in english:
-            return self._unknown_error_code_message(exc.code)
-
-        return t(key, lang, **exc.details_dict())
 
     def _build_ambiguous_empire_options(
         self, save_context: SaveContext
@@ -211,7 +173,7 @@ class GenerationWorker(QThread):
             options.append({"country_id": country_id, "label": label})
         return options
 
-    def _run_generator(self, *, save_path: str, country_id: int | None) -> bool:
+    def _run_generator(self, *, save_path: str, country_id: int | None) -> RunOutcome:
         from generator import TechTreeGenerator
 
         if self._application_root is None:
@@ -222,15 +184,12 @@ class GenerationWorker(QThread):
                 application_root=self._application_root,
             )
         self._progress_value = 0
-        self._final_done_event = None
-        generator.run_generation_process(
+        return generator.run_generation_process(
             save_path=save_path,
             country_id=country_id,
             event_sink=_QtEventSink(self._handle_generation_event),
             cancel_event=self._cancelled,
         )
-
-        return self._is_successful_done_event(self._final_done_event)
 
     def _ui_language(self) -> str:
         return require_supported_language(self._settings_snapshot.localization.language)
@@ -254,21 +213,45 @@ class GenerationWorker(QThread):
         }:
             self.log_message.emit(event.message)
 
-        if event.stage_id == StageId.DONE:
-            self._final_done_event = event
+    @staticmethod
+    def _format_incomplete_message(outcome: RunOutcome, lang: str) -> str:
+        message = t("ui_worker_generation_incomplete", lang)
+        failures = []
+        for failure in outcome.artifact_summary.failed:
+            failures.append(str(failure.path))
+        if failures:
+            message = f"{message}\n" + "\n".join(failures)
+        return message
 
     @staticmethod
-    def _is_successful_done_event(event: GenerationEvent | None) -> bool:
-        if event is None:
-            return False
+    def _error_details_dict(outcome: RunOutcome) -> dict[str, str]:
+        details: dict[str, str] = {}
+        for key, value in outcome.error_details:
+            details[key] = value
+        return details
 
-        details = dict(event.details)
-        outcome_code = str(details.get("outcome_code", "")).strip().lower()
-        if outcome_code:
-            return outcome_code == GenerationOutcomeCode.SUCCESS.value
+    def _localize_core_error(self, outcome: RunOutcome, lang: str) -> str:
+        if outcome.error_code == "technology_swap_collision":
+            return t(
+                "ui_error_technology_swap_collision",
+                lang,
+                **self._error_details_dict(outcome),
+            )
 
-        # Legacy fallback: DONE/100% implies success.
-        return event.kind == EventKind.PROGRESS and event.progress == 100
+        key = _LOAD_ORDER_ERROR_KEYS.get(outcome.error_code)
+        if key:
+            english = LOCALIZATION_STRINGS.get("english", {})
+            if key in english:
+                return t(key, lang, **self._error_details_dict(outcome))
+
+        message = str(outcome.message).strip()
+        if message:
+            return message
+
+        if outcome.error_code:
+            return self._unknown_error_code_message(outcome.error_code)
+
+        return "unknown error"
 
     def _emit_finished(
         self,
