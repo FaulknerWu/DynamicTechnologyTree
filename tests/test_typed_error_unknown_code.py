@@ -9,7 +9,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from dtt_core.load_order_resolver import LoadOrderResolutionError
+from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
 from gui.generation_worker import (
     GenerationOutcome,
     GenerationOutcomeCode,
@@ -29,10 +29,12 @@ def test_typed_error_unknown_code_surfaces_loudly(
 
     def _boom(
         self: GenerationWorker, *, save_path: str, country_id: int | None
-    ) -> bool:
-        raise LoadOrderResolutionError(
-            code="unmapped_test_code",
-            details=(("path", "dummy"),),
+    ) -> RunOutcome:
+        del self, save_path, country_id
+        return RunOutcome(
+            code=RunOutcomeCode.ERROR,
+            error_code="unmapped_test_code",
+            error_details=(("path", "dummy"),),
         )
 
     monkeypatch.setattr(GenerationWorker, "_run_generator", _boom)

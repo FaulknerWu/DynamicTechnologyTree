@@ -14,7 +14,9 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from dtt_core.events import EventKind, GenerationEvent, StageId
+from dtt_core.output import ArtifactWriteFailure, ArtifactWriteSummary
 from dtt_core.prepared_run import AmbiguousPlayerEmpireError
+from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
 from dtt_core.sav_reader import SaveReaderError
 from dtt_core.save_context import SaveContext, SaveEmpireFacts
 from gui.generation_worker import (
@@ -116,11 +118,12 @@ def test_generation_worker_events_forwarding_event_order_progress_filter_and_suc
             country_id: int | None,
             event_sink: Any,
             cancel_event: Any | None = None,
-        ) -> None:
+        ) -> RunOutcome:
             del cancel_event
             run_calls.append((save_path, country_id))
             for event in scripted_events:
                 event_sink.emit(event)
+            return RunOutcome(code=RunOutcomeCode.SUCCESS)
 
     monkeypatch.setitem(
         sys.modules,
@@ -170,7 +173,7 @@ def test_generation_worker_events_failure_unsupported_save_format_maps_to_outcom
         *,
         save_path: str,
         country_id: int | None,
-    ) -> bool:
+    ) -> RunOutcome:
         del save_path, country_id
         raise SaveReaderError("unsupported save fixture")
 
@@ -193,7 +196,7 @@ def test_generation_worker_events_failure_generic_exception_maps_to_error(
         *,
         save_path: str,
         country_id: int | None,
-    ) -> bool:
+    ) -> RunOutcome:
         del save_path, country_id
         raise RuntimeError("boom")
 
@@ -230,7 +233,7 @@ def test_generation_worker_events_failure_ambiguous_country_selection_includes_e
         *,
         save_path: str,
         country_id: int | None,
-    ) -> bool:
+    ) -> RunOutcome:
         del country_id
         save_context = SaveContext(
             save_path=save_path,
@@ -269,7 +272,7 @@ def test_generation_worker_events_failure_incomplete_when_done_sentinel_missing(
     monkeypatch.setattr(
         GenerationWorker,
         "_run_generator",
-        lambda _self, *, save_path, country_id: False,
+        lambda _self, *, save_path, country_id: RunOutcome(code=RunOutcomeCode.INCOMPLETE),
     )
 
     worker = GenerationWorker(_worker_settings())
@@ -294,7 +297,7 @@ def test_generation_worker_outcome_incomplete_maps_from_done_outcome_details(
             country_id: int | None,
             event_sink: Any,
             cancel_event: Any | None = None,
-        ) -> None:
+        ) -> RunOutcome:
             del cancel_event
             del save_path, country_id
             event_sink.emit(
@@ -303,11 +306,19 @@ def test_generation_worker_outcome_incomplete_maps_from_done_outcome_details(
                     kind=EventKind.PROGRESS,
                     message="done",
                     progress=100,
-                    details=(
-                        ("outcome_code", "incomplete"),
-                        ("artifact_failed_paths", "localisation/failing.yml"),
-                    ),
                 )
+            )
+            return RunOutcome(
+                code=RunOutcomeCode.INCOMPLETE,
+                artifact_summary=ArtifactWriteSummary(
+                    failed=[
+                        ArtifactWriteFailure(
+                            path=Path("localisation/failing.yml"),
+                            error_type="PermissionError",
+                            error="simulated",
+                        )
+                    ]
+                ),
             )
 
     monkeypatch.setitem(
@@ -342,7 +353,7 @@ def test_generation_worker_outcome_success_maps_from_done_outcome_details_with_s
             country_id: int | None,
             event_sink: Any,
             cancel_event: Any | None = None,
-        ) -> None:
+        ) -> RunOutcome:
             del cancel_event
             del save_path, country_id
             event_sink.emit(
@@ -351,12 +362,9 @@ def test_generation_worker_outcome_success_maps_from_done_outcome_details_with_s
                     kind=EventKind.PROGRESS,
                     message="done",
                     progress=100,
-                    details=(
-                        ("outcome_code", "success"),
-                        ("artifact_skipped_count", "3"),
-                    ),
                 )
             )
+            return RunOutcome(code=RunOutcomeCode.SUCCESS)
 
     monkeypatch.setitem(
         sys.modules,
@@ -389,7 +397,7 @@ def test_generation_worker_outcome_cancelled_maps_from_done_outcome_details(
             country_id: int | None,
             event_sink: Any,
             cancel_event: Any | None = None,
-        ) -> None:
+        ) -> RunOutcome:
             del save_path, country_id, cancel_event
             event_sink.emit(
                 GenerationEvent(
@@ -397,9 +405,9 @@ def test_generation_worker_outcome_cancelled_maps_from_done_outcome_details(
                     kind=EventKind.PROGRESS,
                     message="done",
                     progress=10,
-                    details=(("outcome_code", "cancelled"),),
                 )
             )
+            return RunOutcome(code=RunOutcomeCode.CANCELLED)
 
     monkeypatch.setitem(
         sys.modules,
@@ -436,7 +444,7 @@ def test_generation_worker_settings_snapshot_frozen_per_run(
             country_id: int | None,
             event_sink: Any,
             cancel_event: Any | None = None,
-        ) -> None:
+        ) -> RunOutcome:
             del cancel_event
             event_sink.emit(
                 GenerationEvent(
@@ -446,6 +454,7 @@ def test_generation_worker_settings_snapshot_frozen_per_run(
                     progress=100,
                 )
             )
+            return RunOutcome(code=RunOutcomeCode.SUCCESS)
 
     monkeypatch.setitem(
         sys.modules,
@@ -489,7 +498,7 @@ def test_generation_worker_no_settings_io(
             country_id: int | None,
             event_sink: Any,
             cancel_event: Any | None = None,
-        ) -> None:
+        ) -> RunOutcome:
             del cancel_event
             event_sink.emit(
                 GenerationEvent(
@@ -499,6 +508,7 @@ def test_generation_worker_no_settings_io(
                     progress=100,
                 )
             )
+            return RunOutcome(code=RunOutcomeCode.SUCCESS)
 
     opened_files: list[str] = []
     original_open = open

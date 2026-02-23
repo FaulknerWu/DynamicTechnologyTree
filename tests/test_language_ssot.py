@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 
 from dtt_core.settings_snapshot import generator_config_from_settings
+from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
 from gui.generation_worker import (
     GenerationOutcome,
     GenerationOutcomeCode,
@@ -45,7 +46,7 @@ def test_language_single_source_settings_drive_ui_and_output(
     monkeypatch.setattr(
         GenerationWorker,
         "_run_generator",
-        lambda _self, *, save_path, country_id: False,
+        lambda _self, *, save_path, country_id: RunOutcome(code=RunOutcomeCode.INCOMPLETE),
     )
 
     settings = Settings()

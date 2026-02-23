@@ -83,7 +83,7 @@ def test_localisation_overrides_are_counted_in_single_parse_pass(
         _LOCALISATION_PARSER, "read_text_with_diagnostics", _counting_read
     )
 
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
     gen.scan_all_tech_descriptions()
 
     assert read_counts == {first: 1, second: 1}

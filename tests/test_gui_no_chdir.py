@@ -37,10 +37,12 @@ def test_gui_no_chdir_startup_keeps_process_cwd_unchanged(
     class DummyWindow:
         def __init__(
             self,
-            config_path: str | os.PathLike[str] | None = None,
+            settings_path: str | os.PathLike[str] | None = None,
             application_path: str | os.PathLike[str] | None = None,
         ) -> None:
-            captured["config_path"] = Path(config_path) if config_path else None
+            captured["settings_path"] = (
+                Path(settings_path) if settings_path else None
+            )
             captured["application_path"] = (
                 Path(application_path) if application_path else None
             )
@@ -74,5 +76,5 @@ def test_gui_no_chdir_startup_keeps_process_cwd_unchanged(
     assert exit_code == 0
     assert os.getcwd() == starting_cwd
     assert captured["show_called"] is True
-    assert captured["config_path"] == settings_path
+    assert captured["settings_path"] == settings_path
     assert captured["application_path"] == application_root

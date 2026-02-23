@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 
 from conftest import _build_settings, _create_minimal_launcher_db
+from dtt_core.output import plan_output_file_paths
 from generator import TechTreeGenerator
 
 
@@ -37,13 +38,25 @@ def _capture_determinism_bytes(
     report_path = run_root / report_rel_path
     assert report_path.exists(), f"missing output file: {report_path}"
 
+    main_paths, main_failures = plan_output_file_paths(
+        localisation_root=Path("localisation"),
+        yml_targets=generator.config.output.yml_targets,
+        lang_code=lang_code,
+        filename=main_name,
+    )
+    assert not main_failures
+
+    replaced_paths, replaced_failures = plan_output_file_paths(
+        localisation_root=Path("localisation"),
+        yml_targets=generator.config.output.yml_targets,
+        lang_code=lang_code,
+        filename=replaced_name,
+    )
+    assert not replaced_failures
+
     return {
-        main_name: _read_identical_output_bytes(
-            generator._get_output_file_paths(lang_code, main_name)
-        ),
-        replaced_name: _read_identical_output_bytes(
-            generator._get_output_file_paths(lang_code, replaced_name)
-        ),
+        main_name: _read_identical_output_bytes(main_paths),
+        replaced_name: _read_identical_output_bytes(replaced_paths),
         report_rel_path: report_path.read_bytes(),
     }
 
@@ -116,7 +129,7 @@ def test_generator_golden_output(tmp_path: Path, monkeypatch) -> None:
     save_path = _write_synthetic_regular_save(tmp_path / "golden.sav")
 
     monkeypatch.chdir(tmp_path)
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
     gen.run_generation_process(save_path=save_path)
 
     lang_code = "english"
@@ -124,8 +137,21 @@ def test_generator_golden_output(tmp_path: Path, monkeypatch) -> None:
     main_name = f"zztechtreemain_l_{lang_code}.yml"
     replaced_name = f"zztechtreereplaced_l_{lang_code}.yml"
 
-    main_paths = gen._get_output_file_paths(lang_code, main_name)
-    replaced_paths = gen._get_output_file_paths(lang_code, replaced_name)
+    main_paths, main_failures = plan_output_file_paths(
+        localisation_root=Path("localisation"),
+        yml_targets=gen.config.output.yml_targets,
+        lang_code=lang_code,
+        filename=main_name,
+    )
+    assert not main_failures
+
+    replaced_paths, replaced_failures = plan_output_file_paths(
+        localisation_root=Path("localisation"),
+        yml_targets=gen.config.output.yml_targets,
+        lang_code=lang_code,
+        filename=replaced_name,
+    )
+    assert not replaced_failures
 
     _assert_identical_outputs(main_paths, golden_root / main_name)
     _assert_identical_outputs(replaced_paths, golden_root / replaced_name)
@@ -157,7 +183,7 @@ def test_output_determinism_across_run_roots(tmp_path: Path, monkeypatch) -> Non
     save_a = _write_synthetic_regular_save(run_a / "run-a.sav")
 
     monkeypatch.chdir(run_a)
-    gen_a = TechTreeGenerator.from_settings(settings_a)
+    gen_a = TechTreeGenerator(settings=settings_a)
     gen_a.run_generation_process(save_path=save_a)
     run_a_bytes = _capture_determinism_bytes(
         run_a,
@@ -177,7 +203,7 @@ def test_output_determinism_across_run_roots(tmp_path: Path, monkeypatch) -> Non
     save_b = _write_synthetic_regular_save(run_b / "run-b.sav")
 
     monkeypatch.chdir(run_b)
-    gen_b = TechTreeGenerator.from_settings(settings_b)
+    gen_b = TechTreeGenerator(settings=settings_b)
     gen_b.run_generation_process(save_path=save_b)
     run_b_bytes = _capture_determinism_bytes(
         run_b,

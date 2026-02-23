@@ -41,7 +41,7 @@ def test_manifest_reuse_load_order_resolved_once(
         LoadOrderResolver, "resolve_enabled_mods", _wrapped_resolve_enabled_mods
     )
 
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
     gen.scan_all_technology_files()
     gen.scan_all_tech_descriptions()
 
@@ -78,7 +78,7 @@ def test_manifest_reuse_cache_invalidated_on_new_run(
         LoadOrderResolver, "resolve_enabled_mods", _wrapped_resolve_enabled_mods
     )
 
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
 
     gen.scan_all_technology_files()
     gen.scan_all_tech_descriptions()

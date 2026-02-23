@@ -11,7 +11,9 @@ import pytest
 import dtt_core.generate_localization as generate_localization_module
 from dtt_core.events import EventKind, GenerationEvent, StageId
 from dtt_core.generate_localization import GenerateLocalizationUseCase, GenerationSteps
-from dtt_core.output import ArtifactWriteFailure, ArtifactWriteSummary
+from dtt_core.eligibility import EligibilityReport
+from dtt_core.output import ArtifactWriteFailure, ArtifactWriteSummary, OutputWriteResult
+from dtt_core.run_outcome import RunOutcomeCode
 
 
 class RecordingEventSink:
@@ -48,7 +50,10 @@ def test_use_case_emits_done_outcome_details_from_artifact_summary(
             )
         ]
     )
-    write_result = types.SimpleNamespace(artifact_summary=failing_summary)
+    write_result = OutputWriteResult(
+        eligibility_report=EligibilityReport(),
+        artifact_summary=failing_summary,
+    )
 
     sink = RecordingEventSink()
     use_case = GenerateLocalizationUseCase(
@@ -67,18 +72,18 @@ def test_use_case_emits_done_outcome_details_from_artifact_summary(
         ),
     )
 
-    use_case.run(save_path="ignored.sav")
+    outcome = use_case.run(save_path="ignored.sav")
+    assert outcome.code == RunOutcomeCode.INCOMPLETE
+    assert [failure.path for failure in outcome.artifact_summary.failed] == [
+        Path("localisation/failing.yml")
+    ]
 
     done_events = [event for event in sink.events if event.stage_id == StageId.DONE]
     assert len(done_events) == 1
     done = done_events[0]
     assert done.kind is EventKind.PROGRESS
     assert done.progress == 100
-
-    details = dict(done.details)
-    assert details["outcome_code"] == "incomplete"
-    assert details["artifact_failed_count"] == "1"
-    assert details["artifact_failed_paths"] == "localisation/failing.yml"
+    assert done.details == ()
 
 
 def test_use_case_cancellation_stops_before_output_writing(
@@ -130,9 +135,10 @@ def test_use_case_cancellation_stops_before_output_writing(
         ),
     )
 
-    use_case.run(save_path="ignored.sav", cancel_event=cancel_event)
+    outcome = use_case.run(save_path="ignored.sav", cancel_event=cancel_event)
 
     assert calls == ["scan_all_technology_files"]
+    assert outcome.code == RunOutcomeCode.CANCELLED
     done_events = [event for event in sink.events if event.stage_id == StageId.DONE]
     assert len(done_events) == 1
-    assert dict(done_events[0].details)["outcome_code"] == "cancelled"
+    assert done_events[0].details == ()

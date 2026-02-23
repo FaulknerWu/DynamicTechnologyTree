@@ -25,7 +25,7 @@ def test_settings_integration_snapshot_uses_passed_settings_snapshot(
     )
     monkeypatch.chdir(tmp_path)
 
-    generator = TechTreeGenerator.from_settings(settings)
+    generator = TechTreeGenerator(settings=settings)
 
     settings.localization.language = "simp_chinese"
     save_path = _write_sav(
@@ -59,8 +59,8 @@ def test_settings_integration_requires_settings_is_hard_error(
     launcher_db = tmp_path / "launcher-v2.sqlite"
     _create_minimal_launcher_db(launcher_db)
 
-    generator = TechTreeGenerator.from_settings(
-        _build_settings(
+    generator = TechTreeGenerator(
+        settings=_build_settings(
             base_game=fixture_root / "stellaris",
             workshop=fixture_root / "workshop",
             launcher_db=launcher_db,
@@ -154,7 +154,7 @@ l_english:
     )
     monkeypatch.chdir(tmp_path)
 
-    generator = TechTreeGenerator.from_settings(settings_a)
+    generator = TechTreeGenerator(settings=settings_a)
     generator.run_generation_process_with_settings(save_path=save_path, settings=settings_a)
 
     assert set(generator.all_technologies) == {"tech_a"}
@@ -221,7 +221,7 @@ def test_settings_snapshot_refreshes_ingestion_diagnostic_cap_between_runs(
     )
     monkeypatch.chdir(tmp_path)
 
-    generator = TechTreeGenerator.from_settings(settings_one)
+    generator = TechTreeGenerator(settings=settings_one)
     generator.run_generation_process_with_settings(save_path=save_path, settings=settings_one)
     assert len(generator._ingestion_pipeline.report.tech_examples) == 1
 

@@ -27,7 +27,7 @@ def _build_generator(
         ] = overlong_tree_roots_log_limit
 
     settings = Settings.model_validate(settings_payload, strict=True)
-    generator = TechTreeGenerator.from_settings(settings)
+    generator = TechTreeGenerator(settings=settings)
     generator._l = (  # type: ignore[method-assign]
         lambda key, **kwargs: f"{key}|{kwargs}" if kwargs else key
     )

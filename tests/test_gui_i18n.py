@@ -24,7 +24,7 @@ from settings_store import load_settings
 
 def _make_window(tmp_path: Path, qt_app: Any) -> MainWindow:
     settings_path = tmp_path / "settings.json"
-    window = MainWindow(config_path=settings_path)
+    window = MainWindow(settings_path=settings_path)
     window.show()
     qt_app.processEvents()
     return window

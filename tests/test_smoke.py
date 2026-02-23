@@ -23,7 +23,7 @@ def test_generator_smoke_empty_dirs(tmp_path: Path) -> None:
         launcher_db=launcher_db,
     )
 
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
     gen.scan_all_technology_files()
     gen.build_technology_tree_relationships()
     gen.scan_all_tech_descriptions()
@@ -70,7 +70,7 @@ l_english:
         launcher_db=launcher_db,
     )
 
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
     gen.scan_all_technology_files()
     gen.scan_all_tech_descriptions()
 

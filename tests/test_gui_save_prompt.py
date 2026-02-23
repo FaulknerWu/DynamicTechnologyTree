@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import QFileDialog, QInputDialog
 import gui.generation_worker as generation_worker_module
 import gui.main_window as main_window_module
 from dtt_core.prepared_run import AmbiguousPlayerEmpireError
+from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
 from dtt_core.save_context import SaveContext, SaveEmpireFacts
 from gui.main_window import MainWindow
 from gui.settings_renderer import PathFieldWidget
@@ -40,7 +41,7 @@ def _configure_required_paths(window: MainWindow, tmp_path: Path) -> None:
 
 def _make_window(tmp_path: Path, qt_app: Any) -> MainWindow:
     settings_path = tmp_path / "settings.json"
-    window = MainWindow(config_path=settings_path)
+    window = MainWindow(settings_path=settings_path)
     window.show()
     qt_app.processEvents()
     _configure_required_paths(window, tmp_path)
@@ -309,7 +310,7 @@ def test_ambiguous_save_shows_empire_chooser_and_passes_selected_country_id(
 
     run_calls: list[tuple[str, int | None]] = []
 
-    def _run_stub(self: Any, *, save_path: str, country_id: int | None) -> bool:
+    def _run_stub(self: Any, *, save_path: str, country_id: int | None) -> RunOutcome:
         run_calls.append((save_path, country_id))
         if country_id is None:
             raise AmbiguousPlayerEmpireError(
@@ -326,7 +327,7 @@ def test_ambiguous_save_shows_empire_chooser_and_passes_selected_country_id(
                 ),
                 country_candidates=(7, 42),
             )
-        return True
+        return RunOutcome(code=RunOutcomeCode.SUCCESS)
 
     monkeypatch.setattr(
         generation_worker_module.GenerationWorker,

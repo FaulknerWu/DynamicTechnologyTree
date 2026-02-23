@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 
 from conftest import _build_settings, _create_minimal_launcher_db
+from dtt_core.output import plan_output_file_paths
 from generator import TechTreeGenerator
 
 
@@ -52,6 +53,17 @@ def _write_synthetic_regular_save(path: Path) -> Path:
     return path
 
 
+def _output_paths(generator: TechTreeGenerator, *, lang_code: str, filename: str) -> list[Path]:
+    paths, failures = plan_output_file_paths(
+        localisation_root=Path("localisation"),
+        yml_targets=generator.config.output.yml_targets,
+        lang_code=lang_code,
+        filename=filename,
+    )
+    assert not failures
+    return paths
+
+
 def test_gestalt_technology_swap_applies_active_display_id(tmp_path: Path, monkeypatch):
     fixture_root = Path(__file__).parent / "fixtures"
     base_game = fixture_root / "stellaris"
@@ -69,19 +81,19 @@ def test_gestalt_technology_swap_applies_active_display_id(tmp_path: Path, monke
     save_path = _write_synthetic_machine_save(tmp_path / "machine.sav")
 
     monkeypatch.chdir(tmp_path)
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
     gen.run_generation_process(save_path=save_path)
 
     lang_code = "english"
     main_name = f"zztechtreemain_l_{lang_code}.yml"
     replaced_name = f"zztechtreereplaced_l_{lang_code}.yml"
 
-    for path in gen._get_output_file_paths(lang_code, main_name):
+    for path in _output_paths(gen, lang_code=lang_code, filename=main_name):
         text = path.read_text(encoding="utf-8-sig")
         assert " tech_child_a_gestalt_techtree:0 " in text
         assert " tech_child_a_techtree:0 " not in text
 
-    for path in gen._get_output_file_paths(lang_code, replaced_name):
+    for path in _output_paths(gen, lang_code=lang_code, filename=replaced_name):
         text = path.read_text(encoding="utf-8-sig")
         assert " tech_child_a_gestalt_desc:0 " in text
         assert " tech_child_a_desc:0 " not in text
@@ -137,18 +149,18 @@ tech_machine_only = {
     save_path = _write_synthetic_regular_save(tmp_path / "regular.sav")
 
     monkeypatch.chdir(tmp_path)
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
     gen.run_generation_process(save_path=save_path)
 
     lang_code = "english"
     main_name = f"zztechtreemain_l_{lang_code}.yml"
     replaced_name = f"zztechtreereplaced_l_{lang_code}.yml"
 
-    for path in gen._get_output_file_paths(lang_code, main_name):
+    for path in _output_paths(gen, lang_code=lang_code, filename=main_name):
         text = path.read_text(encoding="utf-8-sig")
         assert " tech_machine_only_techtree:0 " not in text
         assert "technology:tech_machine_only" not in text
 
-    for path in gen._get_output_file_paths(lang_code, replaced_name):
+    for path in _output_paths(gen, lang_code=lang_code, filename=replaced_name):
         text = path.read_text(encoding="utf-8-sig")
         assert " tech_machine_only_desc:0 " not in text

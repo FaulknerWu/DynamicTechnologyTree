@@ -39,7 +39,7 @@ def _write_profile(
 
 
 def _make_window(settings_path: Path, qt_app: Any) -> MainWindow:
-    window = MainWindow(config_path=settings_path)
+    window = MainWindow(settings_path=settings_path)
     window.show()
     qt_app.processEvents()
     return window
@@ -239,7 +239,7 @@ def test_gui_settings_main_window_default_path_uses_app_config_location(
         staticmethod(lambda _location: str(app_config_root)),
     )
 
-    window = MainWindow(config_path=None)
+    window = MainWindow(settings_path=None)
     try:
         expected = app_config_root / "dynamic-technology-tree" / "settings.json"
         assert window.settings_path == expected

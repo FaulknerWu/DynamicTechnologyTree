@@ -13,7 +13,7 @@ from config import (
     TechConfig,
 )
 from dtt_core.events import EventKind, GenerationEvent, StageId
-from dtt_core.output import OutputWriter
+from dtt_core.output import OutputWriter, plan_output_file_paths
 from dtt_core.settings_snapshot import generator_config_from_settings
 from models import Technology
 from settings import Settings
@@ -106,11 +106,23 @@ def test_output_multi_target_writes_expected_candidate_paths_and_identical_bytes
     expected_main_paths = _expected_output_paths(lang_code, main_name)
     expected_replaced_paths = _expected_output_paths(lang_code, replaced_name)
 
-    assert writer._get_output_file_paths(lang_code, main_name) == expected_main_paths
-    assert (
-        writer._get_output_file_paths(lang_code, replaced_name)
-        == expected_replaced_paths
+    main_paths, main_failures = plan_output_file_paths(
+        localisation_root=Path("localisation"),
+        yml_targets=writer.config.output.yml_targets,
+        lang_code=lang_code,
+        filename=main_name,
     )
+    assert not main_failures
+    assert main_paths == expected_main_paths
+
+    replaced_paths, replaced_failures = plan_output_file_paths(
+        localisation_root=Path("localisation"),
+        yml_targets=writer.config.output.yml_targets,
+        lang_code=lang_code,
+        filename=replaced_name,
+    )
+    assert not replaced_failures
+    assert replaced_paths == expected_replaced_paths
 
     _read_identical_output_bytes(expected_main_paths)
     _read_identical_output_bytes(expected_replaced_paths)
@@ -159,9 +171,14 @@ def test_output_multi_target_application_root_overrides_process_cwd(
     expected_absolute_paths = [
         application_root / path for path in _expected_output_paths(lang_code, main_name)
     ]
-    assert (
-        writer._get_output_file_paths(lang_code, main_name) == expected_absolute_paths
+    planned_paths, failures = plan_output_file_paths(
+        localisation_root=application_root / "localisation",
+        yml_targets=writer.config.output.yml_targets,
+        lang_code=lang_code,
+        filename=main_name,
     )
+    assert not failures
+    assert planned_paths == expected_absolute_paths
     _read_identical_output_bytes(expected_absolute_paths)
 
     report_path = application_root / "localisation" / "dtt-save-report.txt"

@@ -24,7 +24,7 @@ def test_run_generation_process_requires_save_path(
     )
 
     monkeypatch.chdir(tmp_path)
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
 
     with pytest.raises(ValueError, match="save_path is required and cannot be empty"):
         gen.run_generation_process()
@@ -70,7 +70,7 @@ def test_save_required_ambiguous_requires_country_id(
     )
 
     monkeypatch.chdir(tmp_path)
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
 
     with pytest.raises(ValueError, match="ambiguous player empire") as exc:
         gen.run_generation_process(save_path=save_path)
@@ -107,7 +107,7 @@ def test_save_required_non_ambiguous_allows_country_id_to_be_omitted(
     )
 
     monkeypatch.chdir(tmp_path)
-    gen = TechTreeGenerator.from_settings(settings)
+    gen = TechTreeGenerator(settings=settings)
 
     gen.run_generation_process(save_path=save_path)
     assert (Path("localisation") / "dtt-save-report.txt").is_file()

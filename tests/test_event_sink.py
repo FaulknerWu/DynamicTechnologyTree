@@ -354,7 +354,7 @@ def test_run_generation_process_emits_typed_done_event(
     )
 
     monkeypatch.chdir(tmp_path)
-    generator = TechTreeGenerator.from_settings(settings)
+    generator = TechTreeGenerator(settings=settings)
     monkeypatch.setattr(generator, "_l", lambda key, **kwargs: f"@@{key}")
 
     sink = RecordingEventSink()
