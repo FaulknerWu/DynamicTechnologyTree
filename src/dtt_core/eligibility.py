@@ -46,12 +46,6 @@ class UnknownPredicateFrequency:
 
 
 @dataclass(frozen=True)
-class FalseExclusionExample:
-    tech_id: str
-    reason: str
-
-
-@dataclass(frozen=True)
 class UnknownExclusionExample:
     tech_id: str
     unknown_predicates: tuple[str, ...]
@@ -88,15 +82,6 @@ class EligibilityReport:
     @property
     def excluded_by_prereq_count(self) -> int:
         return len(self.excluded_by_prereq)
-
-    @property
-    def excluded_by_false_examples(self) -> tuple[FalseExclusionExample, ...]:
-        return tuple(
-            FalseExclusionExample(
-                tech_id=tech_id, reason=self.excluded_by_false[tech_id].reason
-            )
-            for tech_id in self._sample_keys(self.excluded_by_false)
-        )
 
     @property
     def excluded_by_unknown_examples(self) -> tuple[UnknownExclusionExample, ...]:

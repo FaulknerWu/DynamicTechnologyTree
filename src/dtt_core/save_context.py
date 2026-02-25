@@ -132,10 +132,6 @@ class SaveParseReport:
     member_encodings: Mapping[str, str] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
 
-    @property
-    def total_uncompressed_size(self) -> int:
-        return sum(self.member_uncompressed_sizes.values())
-
 
 @dataclass(frozen=True)
 class SaveContext:

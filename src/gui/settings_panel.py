@@ -53,7 +53,7 @@ class SettingsPanel(QWidget):
             settings=self.settings, parent=self.tabs_widget
         )
         self.apply_raw_button = QPushButton(
-            self._translate_or_default("ui_action_apply_json", "Apply JSON")
+            self._t_or_default("ui_action_apply_json", "Apply JSON")
         )
         self.apply_raw_button.setObjectName("settingsPanelApplyRawButton")
 
@@ -70,7 +70,7 @@ class SettingsPanel(QWidget):
 
         self.tabs_widget.addTab(
             self.advanced_tab,
-            self._translate_or_default("ui_tab_advanced", "Advanced"),
+            self._t_or_default("ui_tab_advanced", "Advanced"),
         )
 
         self.apply_raw_button.clicked.connect(self.apply_raw_editor_changes)
@@ -101,14 +101,14 @@ class SettingsPanel(QWidget):
 
         self.settings_renderer.retranslate(self._translate)
         self.apply_raw_button.setText(
-            self._translate_or_default("ui_action_apply_json", "Apply JSON")
+            self._t_or_default("ui_action_apply_json", "Apply JSON")
         )
 
         advanced_index = self.tabs_widget.indexOf(self.advanced_tab)
         if advanced_index != -1:
             self.tabs_widget.setTabText(
                 advanced_index,
-                self._translate_or_default("ui_tab_advanced", "Advanced"),
+                self._t_or_default("ui_tab_advanced", "Advanced"),
             )
 
     @property
@@ -145,7 +145,7 @@ class SettingsPanel(QWidget):
         is_valid, error_message = self.validation_state()
         self.validation_changed.emit(is_valid, error_message)
 
-    def _translate_or_default(self, key: str, fallback: str) -> str:
+    def _t_or_default(self, key: str, fallback: str) -> str:
         translated = self._translate(key)
         if translated and translated != key:
             return translated

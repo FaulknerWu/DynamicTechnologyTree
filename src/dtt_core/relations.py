@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from config import DisplayConfig
 from models import Technology
 
@@ -23,9 +25,9 @@ class RelationsBuilder:
 
     def precompute_overlong_trees(self) -> None:
         self.overlong_tech_ids.clear()
-        T = self.display_config.max_display_nodes
-        if T <= 0:
+        max_display_nodes = self.display_config.max_display_nodes
+        if max_display_nodes <= 0:
             return
         for tid, tech in self.all_technologies.items():
-            if len(tech.unlocked_tech_ids) > T:
+            if len(tech.unlocked_tech_ids) > max_display_nodes:
                 self.overlong_tech_ids.add(tid)

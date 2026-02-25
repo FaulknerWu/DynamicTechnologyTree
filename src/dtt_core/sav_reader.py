@@ -17,7 +17,7 @@ from dtt_core.clausewitz_parser import (
     Diagnostic,
     parse,
 )
-from dtt_core.clausewitz_text import _atom_text
+from dtt_core.clausewitz_text import FALSY_LITERALS, TRUTHY_LITERALS, _atom_text
 from dtt_core.file_decode import (
     DEFAULT_FALLBACK_ENCODINGS,
     PREFERRED_ENCODINGS,
@@ -58,9 +58,7 @@ class SaveReaderLimits:
             )
 
 
-_TRUTHY_LITERALS = frozenset({"yes", "true", "1", "on"})
-_FALSY_LITERALS = frozenset({"no", "false", "0", "off"})
-_BOOLEAN_LITERALS = _TRUTHY_LITERALS | _FALSY_LITERALS
+_BOOLEAN_LITERALS = TRUTHY_LITERALS | FALSY_LITERALS
 _DLC_KEY_NAMES = frozenset({"dlc", "dlcs"})
 
 
@@ -176,7 +174,6 @@ def _read_archive_members(
         with zipfile.ZipFile(archive_path) as archive:
             member_sizes, compressed_sizes = _validate_zip_safety(
                 archive,
-                archive_path,
                 max_member_uncompressed_size_bytes=limits.max_member_uncompressed_size_bytes,
                 max_total_uncompressed_size_bytes=limits.max_total_uncompressed_size_bytes,
             )
@@ -190,7 +187,6 @@ def _read_archive_members(
 
 def _validate_zip_safety(
     archive: zipfile.ZipFile,
-    archive_path: Path,
     *,
     max_member_uncompressed_size_bytes: int,
     max_total_uncompressed_size_bytes: int,
@@ -486,7 +482,7 @@ def _collect_dlc_values(node: ClausewitzNode) -> list[str]:
         atom_value = _atom_text(current.value)
         if atom_value is not None:
             normalized_value = atom_value.strip().casefold()
-            if normalized_value in _TRUTHY_LITERALS:
+            if normalized_value in TRUTHY_LITERALS:
                 key_token = _sanitize_dlc_token(current.key.value)
                 if key_token is not None:
                     tokens.append(key_token)
@@ -543,7 +539,7 @@ def _collect_membership_tokens(node: ClausewitzNode) -> list[str]:
         atom_value = _atom_text(item.value)
         if atom_value is not None:
             normalized = atom_value.strip().casefold()
-            if normalized in _TRUTHY_LITERALS:
+            if normalized in TRUTHY_LITERALS:
                 token = item.key.value.strip()
                 if token:
                     out.append(token)

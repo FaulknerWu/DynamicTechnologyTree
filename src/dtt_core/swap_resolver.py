@@ -10,6 +10,7 @@ from dtt_core.trigger_evaluator import (
     TriggerEvaluationResult,
     TriggerEvaluator,
 )
+from dtt_core.eligibility import _sorted_unique
 from dtt_core.typed_error import TypedCoreError
 
 
@@ -165,7 +166,3 @@ def _ambiguity_reason_trace(result: TriggerEvaluationResult) -> tuple[str, ...]:
     if result.error is not None:
         return (result.error,)
     return ("technology_swap trigger resolved to unknown",)
-
-
-def _sorted_unique(values: Iterable[str]) -> tuple[str, ...]:
-    return tuple(sorted({value for value in values if value}))

@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from config import (
     DEFAULT_DECODE_FALLBACK_ENCODINGS,
+    DEFAULT_DECODE_FAILURE_POLICY,
     DEFAULT_DECODE_PREFERRED_ENCODINGS,
     DEFAULT_DECODE_REPLACEMENT_ENCODING,
     DecodeFailurePolicy,
@@ -13,7 +14,7 @@ from config import (
 
 PREFERRED_ENCODINGS: tuple[str, ...] = DEFAULT_DECODE_PREFERRED_ENCODINGS
 DEFAULT_FALLBACK_ENCODINGS: tuple[str, ...] = DEFAULT_DECODE_FALLBACK_ENCODINGS
-DEFAULT_FAILURE_POLICY: DecodeFailurePolicy = "replace"
+DEFAULT_FAILURE_POLICY: DecodeFailurePolicy = DEFAULT_DECODE_FAILURE_POLICY
 
 
 @dataclass(frozen=True)

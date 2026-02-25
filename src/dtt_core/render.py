@@ -8,20 +8,25 @@ from config import DisplayConfig
 from localization import LOCALIZATION_STRINGS, RESEARCH_AREA_ICONS
 from models import Technology
 
+# Stellaris 文本颜色标记
+DANGEROUS_TECH_COLOR = "§R"
+HIGH_TIER_TECH_COLOR = "§M"
+NORMAL_TECH_COLOR = "§W"
+
 
 @dataclass
 class RenderContext:
     """Immutable rendering configuration."""
 
     root_id: str
-    max_depth: int  # X limit
-    max_children: int  # Y limit
-    max_nodes: int  # T limit
+    max_depth: int
+    max_children: int
+    max_nodes: int
     lang_code: str
     display_overrides: dict[str, str] | None
     allowed_tech_ids: set[str] | None
     suppress_overflow_line: bool
-    # Pre-computed localized strings
+    # 预计算的本地化字符串
     already_shown_text: str = ""
     folded_more_tpl: str = ""
     global_overflow_tpl: str = ""
@@ -38,10 +43,12 @@ class RenderState:
 
 class TreeRenderer:
     ELLIPSIS = "…"
+    # Stellaris 中 tier >= 5 的科技使用高级颜色标记
+    HIGH_TIER_THRESHOLD = 5
 
-    # Some Stellaris UI fonts (notably the Latin set) don't include Unicode
-    # box-drawing glyphs (U+2500..U+257F), rendering them as "??".
-    # Stick to plain ASCII so the tech tree prefix always displays.
+    # Stellaris UI 部分字体（特别是拉丁字符集）不包含 Unicode
+    # 制表符（U+2500..U+257F），会渲染为 "??"。
+    # 使用纯 ASCII 确保科技树前缀始终正常显示。
     TREE_BAR = "|   "
     TREE_EMPTY = "    "
     TREE_BRANCH = "|-"
@@ -66,23 +73,22 @@ class TreeRenderer:
         display_id = display_id or tech.tech_id
         area_icon = self.research_area_icons.get(tech.research_area, "")
         if tech.is_dangerous_tech:
-            color = "§R"
-        elif tech.tier_level >= 5 or tech.is_repeatable_tech:
-            color = "§M"
+            color = DANGEROUS_TECH_COLOR
+        elif tech.tier_level >= self.HIGH_TIER_THRESHOLD or tech.is_repeatable_tech:
+            color = HIGH_TIER_TECH_COLOR
         else:
-            color = "§W"
+            color = NORMAL_TECH_COLOR
         return f"({tech.tier_level})['technology:{tech.tech_id}', {area_icon}{color}${display_id}$§!]"
 
     def _format_tech_tree_entry(
         self,
         tech_id: str,
         prefix_bars: list[bool],
-        current_prereq: str = "",  # type: ignore
+        current_prereq: str = "",
         lang_code: str = "simp_chinese",
         display_overrides: dict[str, str] | None = None,
         allowed_tech_ids: set[str] | None = None,
         collapsed: bool = False,
-        is_last: bool = False,
     ) -> str:
         if tech_id not in self.all_technologies:
             return ""
@@ -154,60 +160,62 @@ class TreeRenderer:
         visited: set[str] = set()
         stack = [(root_id, 0)]
         while stack:
-            nid, d = stack.pop()
-            if nid in visited:
+            node_id, depth = stack.pop()
+            if node_id in visited:
                 continue
-            if not self._is_tech_allowed(nid, allowed_tech_ids):
+            if not self._is_tech_allowed(node_id, allowed_tech_ids):
                 continue
-            visited.add(nid)
-            max_depth = max(max_depth, d)
-            tech = self.all_technologies.get(nid)
+            visited.add(node_id)
+            max_depth = max(max_depth, depth)
+            tech = self.all_technologies.get(node_id)
             if not tech:
                 continue
             for cid in self._get_sorted_children(tech, allowed_tech_ids):
                 if cid not in visited:
-                    stack.append((cid, d + 1))
+                    stack.append((cid, depth + 1))
         return max_depth
 
     def _compute_max_degree_except_root(
         self, root_id: str, allowed_tech_ids: set[str] | None = None
     ) -> int:
-        m = 0
+        max_degree = 0
         for tid, tech in self.all_technologies.items():
             if tid == root_id:
                 continue
             if not self._is_tech_allowed(tid, allowed_tech_ids):
                 continue
-            m = max(m, len(self._get_sorted_children(tech, allowed_tech_ids)))
-        return max(m, 1)
+            max_degree = max(
+                max_degree, len(self._get_sorted_children(tech, allowed_tech_ids))
+            )
+        return max(max_degree, 1)
 
     def _visit_count_for_limits(
         self,
         root_id: str,
-        x: int,
-        y: int,
-        T: int,
+        max_depth: int,
+        max_children: int,
+        max_nodes: int,
         allowed_tech_ids: set[str] | None = None,
     ) -> int:
         if root_id not in self.all_technologies:
             return 0
         visited: set[str] = set()
 
-        def dfs(nid: str, depth: int, is_root: bool):
-            if x > 0 and depth > x:
+        def dfs(node_id: str, depth: int, is_root: bool):
+            if max_depth > 0 and depth > max_depth:
                 return
-            if not self._is_tech_allowed(nid, allowed_tech_ids):
+            if not self._is_tech_allowed(node_id, allowed_tech_ids):
                 return
-            tech = self.all_technologies.get(nid)
+            tech = self.all_technologies.get(node_id)
             if not tech:
                 return
             children = self._get_sorted_children(tech, allowed_tech_ids)
-            if not is_root and y > 0 and len(children) > y:
-                children = children[:y]
+            if not is_root and max_children > 0 and len(children) > max_children:
+                children = children[:max_children]
             for cid in children:
                 if cid not in visited:
                     visited.add(cid)
-                    if T > 0 and len(visited) > T:
+                    if max_nodes > 0 and len(visited) > max_nodes:
                         return
                     dfs(cid, depth + 1, False)
 
@@ -216,83 +224,91 @@ class TreeRenderer:
 
     def _choose_best_xy_for_root(
         self, root_id: str, allowed_tech_ids: set[str] | None = None
-    ):
+    ) -> tuple[int, int, int] | None:
         if root_id not in self.all_technologies:
-            return -1
+            return None
         root = self.all_technologies[root_id]
-        T = self.display_config.max_display_nodes
+        max_nodes = self.display_config.max_display_nodes
         root_children_count = len(self._get_sorted_children(root, allowed_tech_ids))
-        if T > 0 and root_children_count > T:
-            return -1
+        if max_nodes > 0 and root_children_count > max_nodes:
+            return None
         max_tree_depth = self.display_config.max_tree_depth
-        X_max = (
+        depth_upper_bound = (
             max_tree_depth
             if max_tree_depth > 0
             else self._compute_actual_max_depth(root_id, allowed_tech_ids)
         )
-        if X_max <= 0:
-            X_max = 1
-        Y_max_config = self.display_config.max_children_per_node
-        if Y_max_config > 0:
-            Y_max = Y_max_config
+        if depth_upper_bound <= 0:
+            depth_upper_bound = 1
+        children_upper_bound_config = self.display_config.max_children_per_node
+        if children_upper_bound_config > 0:
+            children_upper_bound = children_upper_bound_config
         else:
-            Y_max = self._compute_max_degree_except_root(root_id, allowed_tech_ids)
-        best_x = 0
-        best_y = 0
-        best_size = -1
-        for x in range(X_max, 0, -1):
-            if T > 0 and best_size == T:
+            children_upper_bound = self._compute_max_degree_except_root(
+                root_id, allowed_tech_ids
+            )
+        best_depth = 0
+        best_children = 0
+        best_node_count = -1
+        for max_depth in range(depth_upper_bound, 0, -1):
+            if max_nodes > 0 and best_node_count == max_nodes:
                 break
-            low, high = 1, Y_max
-            feasible_y = None
-            feasible_size = -1
-            if Y_max == 1:
-                size = self._visit_count_for_limits(root_id, x, 1, T, allowed_tech_ids)
-                if T == 0 or size <= T:
-                    feasible_y = 1
-                    feasible_size = size
+            low, high = 1, children_upper_bound
+            feasible_children = None
+            feasible_count = -1
+            if children_upper_bound == 1:
+                size = self._visit_count_for_limits(
+                    root_id, max_depth, 1, max_nodes, allowed_tech_ids
+                )
+                if max_nodes == 0 or size <= max_nodes:
+                    feasible_children = 1
+                    feasible_count = size
             else:
                 while low <= high:
                     mid = (low + high) // 2
                     size = self._visit_count_for_limits(
                         root_id,
-                        x,
+                        max_depth,
                         mid,
-                        T,
+                        max_nodes,
                         allowed_tech_ids,
                     )
-                    if T == 0:
-                        feasible_y = mid
-                        feasible_size = size
+                    if max_nodes == 0:
+                        feasible_children = mid
+                        feasible_count = size
                         low = mid + 1
                     else:
-                        if size > T:
+                        if size > max_nodes:
                             high = mid - 1
                         else:
-                            feasible_y = mid
-                            feasible_size = size
+                            feasible_children = mid
+                            feasible_count = size
                             low = mid + 1
-            if feasible_y is not None:
+            if feasible_children is not None:
                 if (
-                    feasible_size > best_size
-                    or (feasible_size == best_size and x > best_x)
+                    feasible_count > best_node_count
+                    or (feasible_count == best_node_count and max_depth > best_depth)
                     or (
-                        feasible_size == best_size
-                        and x == best_x
-                        and feasible_y > best_y
+                        feasible_count == best_node_count
+                        and max_depth == best_depth
+                        and feasible_children > best_children
                     )
                 ):
-                    best_x, best_y, best_size = x, feasible_y, feasible_size
-        if best_size < 0:
-            return -1
-        return best_x, best_y, best_size
+                    best_depth, best_children, best_node_count = (
+                        max_depth,
+                        feasible_children,
+                        feasible_count,
+                    )
+        if best_node_count < 0:
+            return None
+        return best_depth, best_children, best_node_count
 
     def _count_remaining_unique(
         self,
         start_nodes: list[str],
         root_id: str,
-        x: int,
-        y: int,
+        max_depth: int,
+        max_children: int,
         current_depth: int,
         visited_global: set[str],
         allowed_tech_ids: set[str] | None = None,
@@ -304,31 +320,31 @@ class TreeRenderer:
             stack.append((n, current_depth + 1))
         local_seen: set[str] = set()
         while stack:
-            nid, d = stack.pop()
-            if not self._is_tech_allowed(nid, allowed_tech_ids):
+            node_id, depth = stack.pop()
+            if not self._is_tech_allowed(node_id, allowed_tech_ids):
                 continue
-            if nid in visited_global or nid in local_seen:
+            if node_id in visited_global or node_id in local_seen:
                 continue
-            local_seen.add(nid)
-            if d >= x:
+            local_seen.add(node_id)
+            if depth >= max_depth:
                 continue
-            tech = self.all_technologies.get(nid)
+            tech = self.all_technologies.get(node_id)
             if not tech:
                 continue
             children = self._get_sorted_children(tech, allowed_tech_ids)
-            if d > 0 and y > 0:
-                if nid != root_id and len(children) > y:
-                    children = children[:y]
+            if depth > 0 and max_children > 0:
+                if node_id != root_id and len(children) > max_children:
+                    children = children[:max_children]
             for cid in children:
-                stack.append((cid, d + 1))
+                stack.append((cid, depth + 1))
         return len(local_seen)
 
     def _create_render_context(
         self,
         root_id: str,
-        x: int,
-        y: int,
-        T: int,
+        max_depth: int,
+        max_children: int,
+        max_nodes: int,
         lang_code: str,
         display_overrides: dict[str, str] | None = None,
         allowed_tech_ids: set[str] | None = None,
@@ -339,9 +355,9 @@ class TreeRenderer:
         )
         return RenderContext(
             root_id=root_id,
-            max_depth=x,
-            max_children=y,
-            max_nodes=T,
+            max_depth=max_depth,
+            max_children=max_children,
+            max_nodes=max_nodes,
             lang_code=lang_code,
             display_overrides=display_overrides,
             allowed_tech_ids=allowed_tech_ids,
@@ -427,7 +443,6 @@ class TreeRenderer:
             ctx.lang_code,
             display_overrides=ctx.display_overrides,
             allowed_tech_ids=ctx.allowed_tech_ids,
-            is_last=not has_more_siblings,
         )
         if not line:
             return
@@ -506,9 +521,9 @@ class TreeRenderer:
     def _render_tree_with_limits(
         self,
         root_id: str,
-        x: int,
-        y: int,
-        T: int,
+        max_depth: int,
+        max_children: int,
+        max_nodes: int,
         lang_code: str,
         display_overrides: dict[str, str] | None = None,
         allowed_tech_ids: set[str] | None = None,
@@ -518,9 +533,9 @@ class TreeRenderer:
             return [], False
         ctx = self._create_render_context(
             root_id,
-            x,
-            y,
-            T,
+            max_depth,
+            max_children,
+            max_nodes,
             lang_code,
             display_overrides,
             allowed_tech_ids,
@@ -543,13 +558,12 @@ class TreeRenderer:
     def _check_root_overflow(
         self,
         tech_id: str,
-        T: int,
-        lang_code: str,
+        max_nodes: int,
         allowed_tech_ids: set[str] | None = None,
     ) -> bool:
         root = self.all_technologies[tech_id]
         root_children_count = len(self._get_sorted_children(root, allowed_tech_ids))
-        if T > 0 and root_children_count > T:
+        if max_nodes > 0 and root_children_count > max_nodes:
             if self.overlong_tech_ids is not None:
                 self.overlong_tech_ids.add(tech_id)
             return True
@@ -567,32 +581,32 @@ class TreeRenderer:
         self, tech_id: str, allowed_tech_ids: set[str] | None = None
     ) -> tuple[int, int]:
         max_tree_depth = self.display_config.max_tree_depth
-        raw_x = (
+        raw_depth = (
             max_tree_depth
             if max_tree_depth > 0
             else self._compute_actual_max_depth(tech_id, allowed_tech_ids)
         )
-        if raw_x <= 0:
-            raw_x = 1
-        raw_y = self.display_config.max_children_per_node
-        return raw_x, raw_y
+        if raw_depth <= 0:
+            raw_depth = 1
+        raw_children = self.display_config.max_children_per_node
+        return raw_depth, raw_children
 
     def _finalize_tree_content(
         self,
         header: str,
         tech_id: str,
-        x: int,
-        y: int,
-        T: int,
+        max_depth: int,
+        max_children: int,
+        max_nodes: int,
         lang_code: str,
         display_overrides: dict[str, str] | None = None,
         allowed_tech_ids: set[str] | None = None,
     ) -> str:
         lines_stage_final, _ = self._render_tree_with_limits(
             tech_id,
-            x,
-            y,
-            T,
+            max_depth,
+            max_children,
+            max_nodes,
             lang_code,
             display_overrides=display_overrides,
             allowed_tech_ids=allowed_tech_ids,
@@ -608,21 +622,21 @@ class TreeRenderer:
         self,
         header: str,
         tech_id: str,
-        T: int,
+        max_nodes: int,
         lang_code: str,
         display_overrides: dict[str, str] | None = None,
         allowed_tech_ids: set[str] | None = None,
     ) -> str:
         chosen = self._choose_best_xy_for_root(tech_id, allowed_tech_ids)
-        if chosen == -1:
+        if chosen is None:
             return self._format_root_overflow_message(header, lang_code)
-        best_x, best_y, _ = chosen
+        best_depth, best_children, _ = chosen
         return self._finalize_tree_content(
             header,
             tech_id,
-            best_x,
-            best_y,
-            T,
+            best_depth,
+            best_children,
+            max_nodes,
             lang_code,
             display_overrides,
             allowed_tech_ids,
@@ -638,28 +652,28 @@ class TreeRenderer:
         if tech_id not in self.all_technologies:
             return ""
         header = "\\n\\n§H$technology_tree_title$§!"
-        T = self.display_config.max_display_nodes
-        if self._check_root_overflow(tech_id, T, lang_code, allowed_tech_ids):
+        max_nodes = self.display_config.max_display_nodes
+        if self._check_root_overflow(tech_id, max_nodes, allowed_tech_ids):
             return self._format_root_overflow_message(header, lang_code)
 
-        raw_x, raw_y = self._get_raw_render_params(tech_id, allowed_tech_ids)
+        raw_depth, raw_children = self._get_raw_render_params(tech_id, allowed_tech_ids)
         _, overflow_stage_probe = self._render_tree_with_limits(
             tech_id,
-            raw_x,
-            raw_y,
-            T,
+            raw_depth,
+            raw_children,
+            max_nodes,
             lang_code,
             display_overrides=display_overrides,
             allowed_tech_ids=allowed_tech_ids,
             suppress_overflow_line=True,
         )
-        if not overflow_stage_probe or T == 0:
+        if not overflow_stage_probe or max_nodes == 0:
             return self._finalize_tree_content(
                 header,
                 tech_id,
-                raw_x,
-                raw_y,
-                T,
+                raw_depth,
+                raw_children,
+                max_nodes,
                 lang_code,
                 display_overrides,
                 allowed_tech_ids,
@@ -668,7 +682,7 @@ class TreeRenderer:
         return self._render_with_optimized_params(
             header,
             tech_id,
-            T,
+            max_nodes,
             lang_code,
             display_overrides,
             allowed_tech_ids,

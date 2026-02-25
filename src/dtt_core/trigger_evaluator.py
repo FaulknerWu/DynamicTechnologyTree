@@ -4,10 +4,8 @@ from dataclasses import dataclass, field
 from collections.abc import Iterable, Mapping
 
 from dtt_core.clausewitz_parser import Assignment, Atom, Block, ClausewitzNode
+from dtt_core.clausewitz_text import FALSY_LITERALS, TRUTHY_LITERALS
 from dtt_core.save_context import SaveContext, SaveEmpireFacts
-
-_TRUE_LITERALS = frozenset({"yes", "true", "1", "on"})
-_FALSE_LITERALS = frozenset({"no", "false", "0", "off"})
 
 _SUPPORTED_POLITY_PREDICATES = frozenset(
     {
@@ -146,16 +144,8 @@ class EmpireProfile:
         return cls.from_save_empire_facts(facts, name=name)
 
     @property
-    def is_auto_mode(self) -> bool:
-        return self.mode == "auto"
-
-    @property
     def is_profile_mode(self) -> bool:
         return self.mode == "profile"
-
-    @property
-    def is_save_mode(self) -> bool:
-        return self.mode == "save"
 
     def resolve_predicate(self, predicate: str) -> bool | None:
         return self.predicates.get(predicate.casefold())
@@ -200,14 +190,6 @@ class TriggerEvaluationResult:
     reason_trace: tuple[str, ...] = ()
     unknown_predicates: tuple[str, ...] = ()
     error: str | None = None
-
-    @property
-    def is_unknown(self) -> bool:
-        return self.value is None
-
-    @property
-    def is_error(self) -> bool:
-        return self.error is not None
 
 
 @dataclass
@@ -571,9 +553,9 @@ class TriggerEvaluator:
         if not isinstance(node, Atom):
             return None
         text = node.token.value.strip().casefold()
-        if text in _TRUE_LITERALS:
+        if text in TRUTHY_LITERALS:
             return True
-        if text in _FALSE_LITERALS:
+        if text in FALSY_LITERALS:
             return False
         return None
 

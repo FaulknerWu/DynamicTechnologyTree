@@ -32,11 +32,6 @@ class LoadOrderResolution:
     database_path: Path | None = None
     migration_names: list[str] = field(default_factory=list)
 
-    @property
-    def enabled_mods(self) -> list[str]:
-        return [entry.raw_entry for entry in self.entries]
-
-
 class LoadOrderResolutionError(TypedCoreError):
     def __init__(self, *, code: str, details: TypedErrorDetails = ()) -> None:
         super().__init__(code=code, details=details)
@@ -85,7 +80,6 @@ class LoadOrderResolver:
                 active_playset_id,
                 playset_mod_columns,
                 mod_columns,
-                warnings,
                 db_path,
             )
 
@@ -300,7 +294,6 @@ class LoadOrderResolver:
         playset_id: str,
         playset_mod_columns: dict[str, str],
         mod_columns: dict[str, str],
-        warnings: list[str],
         db_path: Path,
     ) -> list[ResolvedModEntry]:
         if not playset_mod_columns:
