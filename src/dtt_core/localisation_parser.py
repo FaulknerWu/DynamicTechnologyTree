@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from collections.abc import Iterable, Sequence
 
 from config import (
     DEFAULT_DECODE_REPLACEMENT_ENCODING,

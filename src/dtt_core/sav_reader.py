@@ -22,8 +22,8 @@ from dtt_core.file_decode import (
     DEFAULT_FALLBACK_ENCODINGS,
     PREFERRED_ENCODINGS,
     DecodeDiagnostics,
-    format_decode_warning,
     _ordered_unique_encodings,
+    format_decode_warning,
 )
 from dtt_core.save_context import SaveContext, SaveEmpireFacts, SaveParseReport
 

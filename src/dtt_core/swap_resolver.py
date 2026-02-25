@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 
+from dtt_core.eligibility import _sorted_unique
 from dtt_core.tech_extractor import TechnologySwap
 from dtt_core.tech_merge import MergedTechDefinition
 from dtt_core.trigger_evaluator import (
@@ -10,7 +11,6 @@ from dtt_core.trigger_evaluator import (
     TriggerEvaluationResult,
     TriggerEvaluator,
 )
-from dtt_core.eligibility import _sorted_unique
 from dtt_core.typed_error import TypedCoreError
 
 

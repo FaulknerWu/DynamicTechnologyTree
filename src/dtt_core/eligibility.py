@@ -6,8 +6,8 @@ Unknown potential results are treated as excluded and reported explicitly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 
 from config import (
     DEFAULT_ELIGIBILITY_SAMPLE_SIZE,

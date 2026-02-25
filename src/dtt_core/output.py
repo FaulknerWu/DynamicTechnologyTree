@@ -1,7 +1,7 @@
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
-from collections.abc import Callable, Mapping, Sequence
 
 from config import GeneratorConfig
 from dtt_core.eligibility import EligibilityReport, build_allowed_tech_ids_for_empire

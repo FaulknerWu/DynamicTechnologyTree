@@ -1,25 +1,25 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Event
 
 from dtt_core.cycle import CycleDetector
 from dtt_core.events import EventKind, EventSink, GenerationEvent, StageId
-from gui.i18n import t
 from dtt_core.generate_localization import GenerateLocalizationUseCase, GenerationSteps
 from dtt_core.ingestion_pipeline import IntegratedIngestionPipeline
 from dtt_core.output import OutputWriter
 from dtt_core.relations import RelationsBuilder
 from dtt_core.render import TreeRenderer
+from dtt_core.run_outcome import RunOutcome
 from dtt_core.settings_snapshot import RunSettingsSnapshot, require_settings_snapshot
 from dtt_core.stats import StatsReporter
 from dtt_core.stdout_event_sink import StdoutEventSink
 from dtt_core.tech_merge import MergedTechDefinition
 from dtt_core.trigger_evaluator import EmpireProfile
-from dtt_core.run_outcome import RunOutcome
+from gui.i18n import t
 from localization import LOCALIZATION_STRINGS, RESEARCH_AREA_ICONS
 from models import Technology
 from settings import Settings
-from threading import Event
 
 
 class TechTreeGenerator:

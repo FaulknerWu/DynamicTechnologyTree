@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Sequence
 
 from config import (
-    DEFAULT_DECODE_FALLBACK_ENCODINGS,
     DEFAULT_DECODE_FAILURE_POLICY,
+    DEFAULT_DECODE_FALLBACK_ENCODINGS,
     DEFAULT_DECODE_PREFERRED_ENCODINGS,
     DEFAULT_DECODE_REPLACEMENT_ENCODING,
     DecodeFailurePolicy,

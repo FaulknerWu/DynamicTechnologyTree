@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from collections.abc import Callable
-from typing import Any
 
 from config import (
     DEFAULT_PROGRESS_CYCLES,
@@ -27,8 +26,8 @@ from dtt_core.settings_snapshot import (
     RunSettingsSnapshot,
     require_settings_snapshot,
 )
-from dtt_core.typed_error import TypedCoreError
 from dtt_core.trigger_evaluator import EmpireProfile
+from dtt_core.typed_error import TypedCoreError
 
 
 def _noop_apply_settings_snapshot(_settings: RunSettingsSnapshot) -> None:

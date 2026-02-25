@@ -4,8 +4,7 @@ import locale
 import os
 from typing import Any
 
-from localization import LOCALIZATION_STRINGS
-from localization import require_supported_language_code
+from localization import LOCALIZATION_STRINGS, require_supported_language_code
 
 
 def t(key: str, lang: str | None = None, /, **kwargs: Any) -> str:

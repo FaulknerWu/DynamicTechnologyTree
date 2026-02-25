@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 
 from dtt_core.clausewitz_parser import Assignment, Atom, Block, ClausewitzNode
 from dtt_core.clausewitz_text import FALSY_LITERALS, TRUTHY_LITERALS

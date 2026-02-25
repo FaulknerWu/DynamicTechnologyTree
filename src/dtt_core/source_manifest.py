@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import posixpath
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
-from collections.abc import Iterator
 
 SourceKind = Literal["vanilla", "mod"]
 Domain = Literal["technology", "localisation"]
