@@ -38,7 +38,7 @@ def test_sav_reader_caps_settings_validation_rejects_total_smaller_than_member()
     with pytest.raises(ValidationError) as exc_info:
         Settings.model_validate(
             {
-                "schema_version": 1,
+                "schema_version": Settings().schema_version,
                 "paths": {},
                 "localization": {},
                 "display": {},

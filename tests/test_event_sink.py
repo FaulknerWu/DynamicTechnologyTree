@@ -11,9 +11,9 @@ from itertools import pairwise
 from pathlib import Path
 
 import pytest
+from conftest import _build_settings, _create_minimal_launcher_db, _write_sav
 
 import dtt_core.generate_localization as generate_localization_module
-from conftest import _build_settings, _create_minimal_launcher_db, _write_sav
 from dtt_core.events import (
     EventKind,
     EventSink,
@@ -158,9 +158,9 @@ def test_generate_localization_progress_run_with_settings_uses_settings_mileston
 
     settings = Settings.model_validate(
         {
-            "schema_version": 1,
+            "schema_version": Settings().schema_version,
             "paths": {},
-            "localization": {"language": "english"},
+            "localization": {"target_language_code": "english"},
             "display": {},
             "progress_milestones": {
                 "save_parse_start": 1,

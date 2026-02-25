@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from conftest import _write_sav
+
 import dtt_core.sav_reader as sav_reader
 from dtt_core.clausewitz_parser import Diagnostic
 from dtt_core.save_context import SaveParseReport

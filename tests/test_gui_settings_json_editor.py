@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from gui.settings_json_editor import SettingsJsonEditor
 from settings import Settings
 
+
 def test_gui_settings_json_editor_invalid_json_marks_invalid_and_blocks_apply(
     qt_app: Any,
 ) -> None:

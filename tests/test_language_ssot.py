@@ -8,8 +8,8 @@ from typing import cast
 
 import pytest
 
-from dtt_core.settings_snapshot import generator_config_from_settings
 from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
+from dtt_core.settings_snapshot import require_settings_snapshot
 from gui.generation_worker import (
     GenerationOutcome,
     GenerationOutcomeCode,
@@ -50,7 +50,7 @@ def test_language_single_source_settings_drive_ui_and_output(
     )
 
     settings = Settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
 
     worker = GenerationWorker(settings)
     worker.save_path = "language-single-source.sav"
@@ -60,15 +60,18 @@ def test_language_single_source_settings_drive_ui_and_output(
     assert outcome.code == GenerationOutcomeCode.INCOMPLETE
     assert outcome.message == t("ui_worker_generation_incomplete", "english")
 
-    config = generator_config_from_settings(settings)
-    assert config.localization.target_language_code == settings.localization.language
+    config = require_settings_snapshot(settings).generator_config
+    assert (
+        config.localization.target_language_code
+        == settings.localization.target_language_code
+    )
 
 
 def test_language_invalid_rejected_for_runtime_settings_and_json_load(
     tmp_path: Path,
 ) -> None:
     settings = Settings()
-    settings.localization.language = "not_a_supported_language"
+    settings.localization.target_language_code = "not_a_supported_language"
 
     worker = GenerationWorker(settings)
     worker.save_path = "language-invalid.sav"
@@ -76,7 +79,7 @@ def test_language_invalid_rejected_for_runtime_settings_and_json_load(
     outcome = _capture_finished_outcome(worker)
 
     assert outcome.code == GenerationOutcomeCode.ERROR
-    assert "settings.localization.language must be one of" in outcome.message
+    assert "localization.target_language_code" in outcome.message
     assert "not_a_supported_language" in outcome.message
 
     settings_path = tmp_path / "settings.json"
@@ -85,7 +88,7 @@ def test_language_invalid_rejected_for_runtime_settings_and_json_load(
             {
                 "schema_version": CURRENT_SCHEMA_VERSION,
                 "paths": {},
-                "localization": {"language": "not_a_supported_language"},
+                "localization": {"target_language_code": "not_a_supported_language"},
                 "display": {},
             }
         ),
@@ -96,8 +99,8 @@ def test_language_invalid_rejected_for_runtime_settings_and_json_load(
         load_settings(settings_path)
 
     error = exc_info.value
-    assert error.path == ("localization", "language")
+    assert error.path == ("localization", "target_language_code")
     assert error.pydantic_errors is not None
-    assert ("localization", "language") in {
+    assert ("localization", "target_language_code") in {
         tuple(item["loc"]) for item in error.pydantic_errors
     }

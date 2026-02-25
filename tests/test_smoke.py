@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from conftest import _build_settings, _create_minimal_launcher_db
+
 from generator import TechTreeGenerator
 
 

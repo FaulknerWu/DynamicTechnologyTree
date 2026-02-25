@@ -6,6 +6,7 @@ import importlib
 from pathlib import Path
 
 from conftest import _build_settings, _create_minimal_launcher_db
+
 from generator import TechTreeGenerator
 
 _LOCALISATION_PARSER = importlib.import_module("dtt_core.localisation_parser")

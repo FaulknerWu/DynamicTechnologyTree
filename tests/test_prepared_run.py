@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from conftest import _write_sav
+
 import dtt_core.prepared_run as prepared_run_module
 from dtt_core.events import NullEventSink
 from dtt_core.generate_localization import GenerateLocalizationUseCase, GenerationSteps

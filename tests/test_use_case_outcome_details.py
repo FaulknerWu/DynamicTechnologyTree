@@ -9,10 +9,14 @@ from threading import Event
 import pytest
 
 import dtt_core.generate_localization as generate_localization_module
+from dtt_core.eligibility import EligibilityReport
 from dtt_core.events import EventKind, GenerationEvent, StageId
 from dtt_core.generate_localization import GenerateLocalizationUseCase, GenerationSteps
-from dtt_core.eligibility import EligibilityReport
-from dtt_core.output import ArtifactWriteFailure, ArtifactWriteSummary, OutputWriteResult
+from dtt_core.output import (
+    ArtifactWriteFailure,
+    ArtifactWriteSummary,
+    OutputWriteResult,
+)
 from dtt_core.run_outcome import RunOutcomeCode
 
 

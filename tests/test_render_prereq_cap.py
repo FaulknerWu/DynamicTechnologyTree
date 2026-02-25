@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dtt_core.render import TreeRenderer
-from dtt_core.settings_snapshot import generator_config_from_settings
+from dtt_core.settings_snapshot import require_settings_snapshot
 from models import Technology
 from settings import Settings
 
@@ -48,7 +48,7 @@ def test_render_prereq_cap_custom_shows_more_items_before_ellipsis() -> None:
     techs = _build_prereq_cap_graph()
 
     default_settings = Settings()
-    default_config = generator_config_from_settings(default_settings)
+    default_config = require_settings_snapshot(default_settings).generator_config
     default_renderer = TreeRenderer(
         all_technologies=techs,
         display_config=default_config.display,
@@ -59,7 +59,7 @@ def test_render_prereq_cap_custom_shows_more_items_before_ellipsis() -> None:
 
     custom_settings = Settings()
     custom_settings.display.max_prereq_display = 3
-    custom_config = generator_config_from_settings(custom_settings)
+    custom_config = require_settings_snapshot(custom_settings).generator_config
     custom_renderer = TreeRenderer(
         all_technologies=techs,
         display_config=custom_config.display,

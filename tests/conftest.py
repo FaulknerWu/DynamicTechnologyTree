@@ -12,9 +12,9 @@ SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_DIR))
 sys.modules.setdefault("conftest", sys.modules[__name__])
 
-import pytest
+import pytest  # noqa: E402
 
-from settings import LocalizationSettings, PathsSettings, Settings
+from settings import LocalizationSettings, PathsSettings, Settings  # noqa: E402
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -113,7 +113,7 @@ def _build_settings(
             local_mod_folder_path="",
             launcher_db_path=str(launcher_db),
         ),
-        localization=LocalizationSettings(language=language),
+        localization=LocalizationSettings(target_language_code=language),
     )
 
 

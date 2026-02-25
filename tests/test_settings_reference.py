@@ -1,4 +1,4 @@
-"""Tests for the auto-generated Settings reference page."""
+"""Settings 参考文档自动生成测试。"""
 
 from __future__ import annotations
 
@@ -90,7 +90,8 @@ def test_settings_reference_leaf_field_paths_matches_schema() -> None:
 
 def test_settings_reference_has_all_tabs() -> None:
     localization_module = importlib.import_module("localization")
-    english = localization_module.LOCALIZATION_STRINGS.get("english", {})
+    language_code = localization_module.DEFAULT_LANGUAGE_CODE
+    strings = localization_module.LOCALIZATION_STRINGS.get(language_code, {})
     schema = settings_json_schema()
 
     tabs: set[str] = set()
@@ -101,10 +102,10 @@ def test_settings_reference_has_all_tabs() -> None:
     assert tabs, "Expected at least one tab in schema"
 
     md = generate_reference_markdown()
-    # Reference renders English-localized tab titles as section headers
+    # 参考文档会将“当前默认语言”的 tab 标题作为二级标题渲染出来
     missing_tabs = []
     for tab in tabs:
-        title = english.get(tab, tab)
+        title = strings.get(tab, tab)
         if f"## {title}" not in md:
             missing_tabs.append(f"{tab} (expected heading '## {title}')")
     assert not missing_tabs, "Tabs missing from reference:\n" + "\n".join(
@@ -114,7 +115,7 @@ def test_settings_reference_has_all_tabs() -> None:
 
 def test_settings_reference_contains_defaults() -> None:
     md = generate_reference_markdown()
-    assert "| Default |" in md, "Reference is missing the Default column"
+    assert "| 默认值 |" in md, "参考文档缺少“默认值”列"
     assert "`12`" in md, "Expected max_children_per_node default of 12"
     assert "`4`" in md, "Expected max_tree_depth default of 4"
     assert '`"utf-8-sig"`' in md, "Expected yml_encoding default"

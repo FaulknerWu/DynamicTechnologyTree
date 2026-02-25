@@ -3,8 +3,9 @@ import importlib
 import pytest
 
 _settings = importlib.import_module("settings")
+_localization = importlib.import_module("localization")
 ValidationError = importlib.import_module("pydantic").ValidationError
-DEFAULT_LANGUAGE = _settings.DEFAULT_LANGUAGE
+DEFAULT_LANGUAGE_CODE = _localization.DEFAULT_LANGUAGE_CODE
 Settings = _settings.Settings
 settings_json_schema = _settings.settings_json_schema
 
@@ -12,8 +13,8 @@ settings_json_schema = _settings.settings_json_schema
 def test_settings_schema_defaults_and_json_schema_metadata() -> None:
     default_settings = Settings()
 
-    assert default_settings.schema_version == 1
-    assert default_settings.localization.language == DEFAULT_LANGUAGE
+    assert default_settings.schema_version == 2
+    assert default_settings.localization.target_language_code == DEFAULT_LANGUAGE_CODE
     assert default_settings.display.max_children_per_node == 12
     assert default_settings.display.max_tree_depth == 4
     assert default_settings.display.max_display_nodes == 128
@@ -57,7 +58,9 @@ def test_settings_schema_defaults_and_json_schema_metadata() -> None:
     assert output_props["eligibility_sample_size"]["tab"] == "ui_tab_output"
     assert output_props["eligibility_sample_size"]["group"] == "eligibility"
 
-    language_schema = schema["$defs"]["LocalizationSettings"]["properties"]["language"]
+    language_schema = schema["$defs"]["LocalizationSettings"]["properties"][
+        "target_language_code"
+    ]
     assert "english" in language_schema["enum"]
     assert "simp_chinese" in language_schema["enum"]
 

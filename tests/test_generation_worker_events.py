@@ -328,7 +328,7 @@ def test_generation_worker_outcome_incomplete_maps_from_done_outcome_details(
     )
 
     settings = _worker_settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
 
     worker = GenerationWorker(settings)
     worker.save_path = "incomplete-details.sav"
@@ -373,7 +373,7 @@ def test_generation_worker_outcome_success_maps_from_done_outcome_details_with_s
     )
 
     settings = _worker_settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
 
     worker = GenerationWorker(settings)
     worker.save_path = "success-details.sav"
@@ -416,7 +416,7 @@ def test_generation_worker_outcome_cancelled_maps_from_done_outcome_details(
     )
 
     settings = _worker_settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
 
     worker = GenerationWorker(settings)
     worker.save_path = "cancelled-details.sav"
@@ -434,7 +434,7 @@ def test_generation_worker_settings_snapshot_frozen_per_run(
     class FakeGenerator:
         def __init__(self, *, settings: Settings) -> None:
             captured_settings.append(
-                (settings.localization.language, settings.display.max_tree_depth)
+                (settings.localization.target_language_code, settings.display.max_tree_depth)
             )
 
         def run_generation_process(
@@ -462,13 +462,13 @@ def test_generation_worker_settings_snapshot_frozen_per_run(
         types.SimpleNamespace(TechTreeGenerator=FakeGenerator),
     )
     settings = _worker_settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
     settings.display.max_tree_depth = 4
 
     worker = GenerationWorker(settings)
     worker.save_path = "snapshot.sav"
 
-    settings.localization.language = "simp_chinese"
+    settings.localization.target_language_code = "simp_chinese"
     settings.display.max_tree_depth = 9
 
     outcome = _capture_finished_outcome(worker)

@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from conftest import _build_settings, _create_minimal_launcher_db, _write_sav
+
 from generator import TechTreeGenerator
 from settings import LocalizationSettings, PathsSettings, Settings
+
 
 def test_settings_integration_snapshot_uses_passed_settings_snapshot(
     tmp_path: Path,
@@ -27,7 +28,7 @@ def test_settings_integration_snapshot_uses_passed_settings_snapshot(
 
     generator = TechTreeGenerator(settings=settings)
 
-    settings.localization.language = "simp_chinese"
+    settings.localization.target_language_code = "simp_chinese"
     save_path = _write_sav(
         tmp_path / "settings-snapshot.sav",
         meta='name = "Settings Integration Save"\n',
@@ -67,7 +68,7 @@ def test_settings_integration_requires_settings_is_hard_error(
         )
     )
 
-    with pytest.raises(ValueError, match="settings is required and cannot be empty"):
+    with pytest.raises(ValueError, match="settings 不能为空"):
         generator.run_generation_process_with_settings(
             save_path=tmp_path / "missing-settings.sav",
             settings=None,
@@ -127,7 +128,7 @@ l_english:
             local_mod_folder_path="",
             launcher_db_path=str(launcher_db),
         ),
-        localization=LocalizationSettings(language="english"),
+        localization=LocalizationSettings(target_language_code="english"),
     )
     settings_a = base_settings.model_copy(deep=True)
     settings_a.file_indexing.technology_glob = "a_*.txt"
@@ -193,7 +194,7 @@ def test_settings_snapshot_refreshes_ingestion_diagnostic_cap_between_runs(
             local_mod_folder_path="",
             launcher_db_path=str(launcher_db),
         ),
-        localization=LocalizationSettings(language="english"),
+        localization=LocalizationSettings(target_language_code="english"),
     )
 
     settings_one = base_settings.model_copy(deep=True)

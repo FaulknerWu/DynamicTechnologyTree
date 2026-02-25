@@ -11,7 +11,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
 from dtt_core.swap_resolver import SwapCollision, SwapResolutionReport
-from gui.generation_worker import GenerationOutcome, GenerationOutcomeCode, GenerationWorker
+from gui.generation_worker import (
+    GenerationOutcome,
+    GenerationOutcomeCode,
+    GenerationWorker,
+)
 from settings import Settings
 
 
@@ -19,7 +23,7 @@ def test_generation_worker_surfaces_swap_collision_as_actionable_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = Settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
 
     worker = GenerationWorker(settings)
     worker.save_path = "dummy.sav"

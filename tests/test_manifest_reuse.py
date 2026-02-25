@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from conftest import _build_settings, _create_minimal_launcher_db
+
 from dtt_core.load_order_resolver import LoadOrderResolver
 from generator import TechTreeGenerator
 

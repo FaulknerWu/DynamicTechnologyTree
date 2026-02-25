@@ -20,7 +20,7 @@ def _build_generator(
     *, overlong_tree_roots_log_limit: int | None = None
 ) -> TechTreeGenerator:
     settings_payload = Settings().model_dump(mode="python", round_trip=True)
-    settings_payload["localization"]["language"] = "english"
+    settings_payload["localization"]["target_language_code"] = "english"
     if overlong_tree_roots_log_limit is not None:
         settings_payload["diagnostics"][
             "overlong_tree_roots_log_limit"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from config import DisplayConfig, GeneratorConfig, LocalizationConfig, PathConfig, TechConfig
+from config import DisplayConfig, GeneratorConfig, LocalizationConfig, PathConfig
 from dtt_core.ingestion_pipeline import IntegratedIngestionPipeline
 from dtt_core.tech_merge import MergedTechDefinition
 
@@ -17,7 +17,6 @@ def _build_pipeline(tmp_path: Path) -> IntegratedIngestionPipeline:
         ),
         localization=LocalizationConfig(target_language_code="english"),
         display=DisplayConfig(),
-        tech=TechConfig(),
     )
     return IntegratedIngestionPipeline(
         config=config,
@@ -52,4 +51,3 @@ def test_explicit_dangerous_false_overrides_heuristics(tmp_path: Path) -> None:
     tech = pipeline._create_runtime_technology(merged)
 
     assert tech.is_dangerous_tech is False
-

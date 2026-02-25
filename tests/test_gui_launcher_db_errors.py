@@ -11,14 +11,16 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import dtt_core.load_order_resolver as load_order_resolver_module
 from conftest import _build_settings
+
+import dtt_core.load_order_resolver as load_order_resolver_module
 from gui.generation_worker import (
     GenerationOutcome,
     GenerationOutcomeCode,
     GenerationWorker,
 )
 from settings import Settings
+
 
 def _write_regular_save(path: Path) -> Path:
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:

@@ -28,7 +28,7 @@ def test_settings_store_roundtrip(tmp_path: Path) -> None:
                 "launcher_db_path": "/tmp/launcher-v2.sqlite",
                 "local_mod_folder_path": "/tmp/local-mods",
             },
-            "localization": {"language": "english"},
+            "localization": {"target_language_code": "english"},
             "display": {
                 "max_children_per_node": 8,
                 "max_tree_depth": 3,

@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from conftest import _write_sav
+
 from dtt_core.events import NullEventSink
 from dtt_core.generate_localization import GenerateLocalizationUseCase, GenerationSteps
 from dtt_core.sav_reader import SaveReaderError
@@ -24,7 +24,7 @@ def test_sav_reader_custom_caps_run_with_settings_enforces_zip_member_cap(
 
     settings = Settings.model_validate(
         {
-            "schema_version": 1,
+            "schema_version": Settings().schema_version,
             "paths": {},
             "localization": {},
             "display": {},

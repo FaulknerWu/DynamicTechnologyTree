@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dtt_core.ingestion_pipeline import IntegratedIngestionPipeline
 from dtt_core.events import EventKind, GenerationEvent, StageId
-from dtt_core.settings_snapshot import generator_config_from_settings
+from dtt_core.ingestion_pipeline import IntegratedIngestionPipeline
+from dtt_core.settings_snapshot import require_settings_snapshot
 from settings import Settings
 
 
@@ -12,14 +12,14 @@ def _build_pipeline(
     *, diagnostic_example_limit: int | None = None
 ) -> IntegratedIngestionPipeline:
     settings_payload = Settings().model_dump(mode="python", round_trip=True)
-    settings_payload["localization"]["language"] = "english"
+    settings_payload["localization"]["target_language_code"] = "english"
     if diagnostic_example_limit is not None:
         settings_payload["ingestion"][
             "diagnostic_example_limit"
         ] = diagnostic_example_limit
 
     settings = Settings.model_validate(settings_payload, strict=True)
-    config = generator_config_from_settings(settings)
+    config = require_settings_snapshot(settings).generator_config
     return IntegratedIngestionPipeline(
         config=config,
         localize=lambda key, **kwargs: key,

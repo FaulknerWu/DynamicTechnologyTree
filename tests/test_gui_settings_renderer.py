@@ -37,7 +37,7 @@ def test_gui_settings_renderer_renders_controls_for_all_current_settings_fields(
             "paths.mod_folder_path",
             "paths.launcher_db_path",
             "paths.local_mod_folder_path",
-            "localization.language",
+            "localization.target_language_code",
             "display.max_children_per_node",
             "display.max_tree_depth",
             "display.max_display_nodes",
@@ -54,7 +54,9 @@ def test_gui_settings_renderer_renders_controls_for_all_current_settings_fields(
             renderer.widget_for("paths.local_mod_folder_path"), PathFieldWidget
         )
         assert isinstance(renderer.widget_for("schema_version"), QSpinBox)
-        assert isinstance(renderer.widget_for("localization.language"), QComboBox)
+        assert isinstance(
+            renderer.widget_for("localization.target_language_code"), QComboBox
+        )
     finally:
         renderer.widget.close()
         renderer.widget.deleteLater()
@@ -68,7 +70,9 @@ def test_gui_settings_renderer_updates_settings_and_runs_validation_on_change(
     try:
         path_widget = cast(PathFieldWidget, renderer.widget_for("paths.base_game_path"))
         depth_spin = cast(QSpinBox, renderer.widget_for("display.max_tree_depth"))
-        language_combo = cast(QComboBox, renderer.widget_for("localization.language"))
+        language_combo = cast(
+            QComboBox, renderer.widget_for("localization.target_language_code")
+        )
 
         before_runs = renderer.validation_runs
         path_widget.setText("/tmp/stellaris")
@@ -87,8 +91,8 @@ def test_gui_settings_renderer_updates_settings_and_runs_validation_on_change(
         language_combo.setCurrentText("english")
         qt_app.processEvents()
 
-        assert settings.localization.language == "english"
-        assert renderer.error_for("localization.language") is None
+        assert settings.localization.target_language_code == "english"
+        assert renderer.error_for("localization.target_language_code") is None
     finally:
         renderer.widget.close()
         renderer.widget.deleteLater()
@@ -100,17 +104,19 @@ def test_gui_settings_renderer_validation_marks_invalid_enum_value(
 ) -> None:
     renderer, settings = _build_renderer(qt_app)
     try:
-        language_combo = cast(QComboBox, renderer.widget_for("localization.language"))
+        language_combo = cast(
+            QComboBox, renderer.widget_for("localization.target_language_code")
+        )
 
         language_combo.setEditText("not_a_supported_language")
         qt_app.processEvents()
 
-        assert settings.localization.language == "not_a_supported_language"
+        assert settings.localization.target_language_code == "not_a_supported_language"
         assert renderer.validate() is False
 
-        error_message = renderer.error_for("localization.language")
+        error_message = renderer.error_for("localization.target_language_code")
         assert error_message is not None
-        assert "language must be one of" in error_message
+        assert "target_language_code" in error_message or "必须" in error_message
         assert "c62828" in language_combo.styleSheet()
     finally:
         renderer.widget.close()

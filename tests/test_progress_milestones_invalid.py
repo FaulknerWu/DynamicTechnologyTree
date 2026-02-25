@@ -11,7 +11,7 @@ def test_progress_milestones_invalid_non_monotonic_rejected_with_precise_path() 
     with pytest.raises(ValidationError) as exc_info:
         Settings.model_validate(
             {
-                "schema_version": 1,
+                "schema_version": Settings().schema_version,
                 "paths": {},
                 "localization": {},
                 "display": {},

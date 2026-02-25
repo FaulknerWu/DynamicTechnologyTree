@@ -13,13 +13,12 @@ from config import (
     GeneratorConfig,
     LocalizationConfig,
     PathConfig,
-    TechConfig,
 )
 from dtt_core.clausewitz_parser import Assignment, Block, parse
 from dtt_core.eligibility import build_allowed_tech_ids_for_empire
 from dtt_core.output import OutputWriter
 from dtt_core.render import TreeRenderer
-from dtt_core.settings_snapshot import generator_config_from_settings
+from dtt_core.settings_snapshot import require_settings_snapshot
 from dtt_core.tech_merge import MergedTechDefinition
 from dtt_core.trigger_evaluator import EmpireProfile
 from models import Technology
@@ -127,7 +126,6 @@ def _build_config() -> GeneratorConfig:
         display=DisplayConfig(
             max_children_per_node=12, max_tree_depth=5, max_display_nodes=128
         ),
-        tech=TechConfig(),
     )
 
 
@@ -137,12 +135,12 @@ def _build_settings_config(
     eligibility_unknown_warning_threshold: int = 1,
 ) -> GeneratorConfig:
     settings = Settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
     settings.output.eligibility_sample_size = eligibility_sample_size
     settings.output.eligibility_unknown_warning_threshold = (
         eligibility_unknown_warning_threshold
     )
-    return generator_config_from_settings(settings)
+    return require_settings_snapshot(settings).generator_config
 
 
 def test_filtered_tree_module_file_is_removed() -> None:

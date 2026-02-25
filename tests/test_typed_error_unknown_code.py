@@ -22,7 +22,7 @@ def test_typed_error_unknown_code_surfaces_loudly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = Settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
 
     worker = GenerationWorker(settings)
     worker.save_path = "dummy.sav"

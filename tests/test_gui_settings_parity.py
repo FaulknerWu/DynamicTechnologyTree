@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import QWidget
 from gui.settings_panel import SettingsPanel
 from settings import Settings, settings_json_schema
 
+
 def _build_panel(
     qt_app: Any,
     *,

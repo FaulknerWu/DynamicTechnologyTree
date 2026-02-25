@@ -13,12 +13,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QSpinBox
 
 import gui as gui_module
-import gui.main_window as main_window_module
 from gui.main_window import MainWindow
 from gui.settings_panel import SettingsPanel
 from gui.settings_renderer import PathFieldWidget
 from settings import Settings
 from settings_store import load_settings, save_settings
+
 
 def _write_profile(
     path: Path,
