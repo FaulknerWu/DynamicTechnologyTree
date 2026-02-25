@@ -32,7 +32,8 @@ from gui.i18n import t
 from gui.path_detector import PathDetector
 from gui.settings_panel import SettingsPanel
 from gui.title_bar import CustomTitleBar
-from settings import Settings, require_supported_language, settings_json_schema
+from localization import require_supported_language_code
+from settings import Settings, settings_json_schema
 from settings_store import SettingsStoreError, load_settings, save_settings
 
 
@@ -67,7 +68,9 @@ class MainWindow(QMainWindow):
 
     def _current_lang(self) -> str:
         try:
-            return require_supported_language(self.settings.localization.language)
+            return require_supported_language_code(
+                self.settings.localization.target_language_code
+            )
         except ValueError:
             return "english"
 

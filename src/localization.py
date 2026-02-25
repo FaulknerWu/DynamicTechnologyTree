@@ -1,4 +1,6 @@
-"""Localization constants separated from core logic."""
+"""本模块集中管理本项目的本地化文案与语言元数据（SSOT）。"""
+
+from __future__ import annotations
 
 RESEARCH_AREA_ICONS = {
     "physics": "£physics£",
@@ -469,6 +471,31 @@ LOCALIZATION_STRINGS = {
     },
 }
 
+
+SUPPORTED_LANGUAGE_CODES = tuple(sorted(LOCALIZATION_STRINGS.keys()))
+SUPPORTED_LANGUAGE_CODE_SET = set(SUPPORTED_LANGUAGE_CODES)
+if not SUPPORTED_LANGUAGE_CODES:
+    raise RuntimeError("LOCALIZATION_STRINGS 必须至少包含一种语言")
+
+DEFAULT_LANGUAGE_CODE = (
+    "simp_chinese"
+    if "simp_chinese" in SUPPORTED_LANGUAGE_CODE_SET
+    else SUPPORTED_LANGUAGE_CODES[0]
+)
+
+
+def require_supported_language_code(
+    value: str,
+    *,
+    field_name: str = "language",
+) -> str:
+    language_code = str(value).strip().lower()
+    if language_code in SUPPORTED_LANGUAGE_CODE_SET:
+        return language_code
+    raise ValueError(
+        f"{field_name} 必须是以下之一：{', '.join(SUPPORTED_LANGUAGE_CODES)}；实际为 {value!r}"
+    )
+
 _SETTINGS_METADATA_DEFAULTS_ENGLISH = {
     "ui_tab_output": "Output",
     "ui_tab_advanced": "Advanced",
@@ -578,11 +605,13 @@ _SETTINGS_METADATA_DEFAULTS_ENGLISH = {
 }
 
 
-english_strings = LOCALIZATION_STRINGS.get("english")
-if isinstance(english_strings, dict):
+def initialize_metadata_defaults() -> None:
+    """将 UI 元数据默认值合并到 LOCALIZATION_STRINGS 中。必须在应用启动时显式调用一次。"""
+    english_strings = LOCALIZATION_STRINGS.get("english")
+    if not isinstance(english_strings, dict):
+        return
     for key, value in _SETTINGS_METADATA_DEFAULTS_ENGLISH.items():
         english_strings.setdefault(key, value)
-
     for language, language_strings in LOCALIZATION_STRINGS.items():
         if language == "english":
             continue

@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from dtt_core.cycle import CycleDetector
 from dtt_core.events import EventKind, EventSink, GenerationEvent, StageId
+from gui.i18n import t
 from dtt_core.generate_localization import GenerateLocalizationUseCase, GenerationSteps
 from dtt_core.ingestion_pipeline import IntegratedIngestionPipeline
 from dtt_core.output import OutputWriter
@@ -90,18 +93,7 @@ class TechTreeGenerator:
         )
 
     def _l(self, key: str, **kwargs) -> str:
-        lang_code = self.config.localization.target_language_code
-        lang_dict = LOCALIZATION_STRINGS.get(
-            lang_code,
-            LOCALIZATION_STRINGS.get("english", {}),
-        )
-        base = lang_dict.get(key)
-        if base is None:
-            base = LOCALIZATION_STRINGS.get("english", {}).get(key, key)
-        try:
-            return base.format(**kwargs)
-        except Exception:
-            return base
+        return t(key, self.config.localization.target_language_code, **kwargs)
 
     def scan_all_technology_files(self) -> None:
         self._ingestion_pipeline.scan_all_technology_files()

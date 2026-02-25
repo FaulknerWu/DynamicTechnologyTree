@@ -17,8 +17,8 @@ from dtt_core.sav_reader import SaveReaderError
 from dtt_core.save_context import SaveContext
 from dtt_core.settings_snapshot import require_settings_snapshot
 from gui.i18n import t
-from localization import LOCALIZATION_STRINGS
-from settings import Settings, require_supported_language
+from localization import require_supported_language_code
+from settings import Settings
 
 
 class GenerationOutcomeCode(str, Enum):
@@ -192,7 +192,9 @@ class GenerationWorker(QThread):
         )
 
     def _ui_language(self) -> str:
-        return require_supported_language(self._settings_snapshot.localization.language)
+        return require_supported_language_code(
+            self._settings_snapshot.localization.target_language_code
+        )
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -240,9 +242,10 @@ class GenerationWorker(QThread):
 
         key = _LOAD_ORDER_ERROR_KEYS.get(outcome.error_code)
         if key:
-            english = LOCALIZATION_STRINGS.get("english", {})
-            if key in english:
-                return t(key, lang, **self._error_details_dict(outcome))
+            # t() 在 key 不存在时返回 key 本身；检测到有效翻译时使用之
+            translated = t(key, lang, **self._error_details_dict(outcome))
+            if translated != key:
+                return translated
 
         message = str(outcome.message).strip()
         if message:

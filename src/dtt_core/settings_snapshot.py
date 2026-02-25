@@ -1,37 +1,76 @@
 from __future__ import annotations
 
-from typing import cast
+from dataclasses import dataclass
+from typing import Any
+
+from pydantic import ValidationError  # pyright: ignore[reportMissingImports]
 
 from config import (
     DecodeConfig,
-    DecodeFailurePolicy,
     DiagnosticsConfig,
     DisplayConfig,
-    ExistingFilePolicy,
     FileIndexConfig,
     GeneratorConfig,
     IngestionConfig,
     LoadOrderConfig,
     LocalizationConfig,
-    MultiActivePlaysetSelectionPolicy,
     OutputConfig,
-    OutputWriteErrorPolicy,
     PathConfig,
-    TechConfig,
 )
-from settings import Settings, require_supported_language
+from dtt_core.sav_reader import SaveReaderLimits
+from settings import Settings
 
 
-def require_settings_snapshot(settings: Settings | None) -> Settings:
+@dataclass(frozen=True)
+class ProgressMilestones:
+    """生成流程各阶段的进度百分比里程碑。"""
+
+    save_parse_start: int
+    save_parse_parse: int
+    load_order: int
+    relations: int
+    ingest_l10n: int
+    render: int
+    cycles: int
+    write_output: int
+    done: int
+
+
+@dataclass(frozen=True)
+class RunSettingsSnapshot:
+    """一次生成任务的不可变配置快照（核心仅依赖该对象，不依赖 Settings）。"""
+
+    generator_config: GeneratorConfig
+    progress_milestones: ProgressMilestones
+    save_reader_limits: SaveReaderLimits
+
+    @property
+    def ui_language_code(self) -> str:
+        return self.generator_config.localization.target_language_code
+
+
+def require_settings_snapshot(
+    settings: Settings | RunSettingsSnapshot | None,
+) -> RunSettingsSnapshot:
+    """将用户 Settings 转换为核心运行所需的快照，并在此边界做最终校验。"""
+
     if settings is None:
-        raise ValueError("settings is required and cannot be empty")
-    return settings.model_copy(deep=True)
+        raise ValueError("settings 不能为空")
+
+    if isinstance(settings, RunSettingsSnapshot):
+        return settings
+
+    payload = settings.model_dump(mode="python", round_trip=True)
+    try:
+        validated = Settings.model_validate(payload, strict=True)
+    except ValidationError as exc:
+        raise ValueError(_format_settings_validation_error(exc)) from exc
+
+    return _snapshot_from_validated_settings(validated)
 
 
-def generator_config_from_settings(settings: Settings) -> GeneratorConfig:
-    language_code = require_supported_language(settings.localization.language)
-
-    return GeneratorConfig(
+def _snapshot_from_validated_settings(settings: Settings) -> RunSettingsSnapshot:
+    config = GeneratorConfig(
         paths=PathConfig(
             base_game_path=settings.paths.base_game_path,
             mod_folder_path=settings.paths.mod_folder_path,
@@ -46,13 +85,10 @@ def generator_config_from_settings(settings: Settings) -> GeneratorConfig:
             localisation_replace_prefix=settings.file_indexing.localisation_replace_prefix,
         ),
         load_order=LoadOrderConfig(
-            multi_active_playset_selection_policy=cast(
-                MultiActivePlaysetSelectionPolicy,
-                settings.load_order.multi_active_playset_selection_policy,
-            ),
+            multi_active_playset_selection_policy=settings.load_order.multi_active_playset_selection_policy,
         ),
         localization=LocalizationConfig(
-            target_language_code=language_code,
+            target_language_code=settings.localization.target_language_code,
         ),
         display=DisplayConfig(
             max_children_per_node=settings.display.max_children_per_node,
@@ -61,11 +97,8 @@ def generator_config_from_settings(settings: Settings) -> GeneratorConfig:
             max_prereq_display=settings.display.max_prereq_display,
         ),
         diagnostics=DiagnosticsConfig(
-            overlong_tree_roots_log_limit=(
-                settings.diagnostics.overlong_tree_roots_log_limit
-            )
+            overlong_tree_roots_log_limit=settings.diagnostics.overlong_tree_roots_log_limit,
         ),
-        tech=TechConfig(),
         ingestion=IngestionConfig(
             diagnostic_example_limit=settings.ingestion.diagnostic_example_limit,
         ),
@@ -73,29 +106,65 @@ def generator_config_from_settings(settings: Settings) -> GeneratorConfig:
             yml_targets=tuple(settings.output.yml_targets),
             yml_encoding=settings.output.yml_encoding,
             report_encoding=settings.output.report_encoding,
-            on_write_error=cast(
-                OutputWriteErrorPolicy,
-                settings.output.on_write_error,
-            ),
-            on_existing_file=cast(
-                ExistingFilePolicy,
-                settings.output.on_existing_file,
-            ),
+            on_write_error=settings.output.on_write_error,
+            on_existing_file=settings.output.on_existing_file,
             eligibility_sample_size=settings.output.eligibility_sample_size,
-            eligibility_unknown_warning_threshold=(
-                settings.output.eligibility_unknown_warning_threshold
-            ),
+            eligibility_unknown_warning_threshold=settings.output.eligibility_unknown_warning_threshold,
         ),
         decode=DecodeConfig(
             preferred_encodings=tuple(settings.decode.preferred_encodings),
             fallback_encodings=tuple(settings.decode.fallback_encodings),
             replacement_encoding=settings.decode.replacement_encoding,
-            on_failure=cast(DecodeFailurePolicy, settings.decode.on_failure),
+            on_failure=settings.decode.on_failure,
         ),
     )
 
+    progress = ProgressMilestones(
+        save_parse_start=settings.progress_milestones.save_parse_start,
+        save_parse_parse=settings.progress_milestones.save_parse_parse,
+        load_order=settings.progress_milestones.load_order,
+        relations=settings.progress_milestones.relations,
+        ingest_l10n=settings.progress_milestones.ingest_l10n,
+        render=settings.progress_milestones.render,
+        cycles=settings.progress_milestones.cycles,
+        write_output=settings.progress_milestones.write_output,
+        done=settings.progress_milestones.done,
+    )
+
+    save_reader_limits = SaveReaderLimits(
+        max_member_uncompressed_size_bytes=settings.save_reader.max_member_uncompressed_size_bytes,
+        max_total_uncompressed_size_bytes=settings.save_reader.max_total_uncompressed_size_bytes,
+        max_parse_diagnostics_per_member=settings.save_reader.max_parse_diagnostics_per_member,
+    )
+
+    return RunSettingsSnapshot(
+        generator_config=config,
+        progress_milestones=progress,
+        save_reader_limits=save_reader_limits,
+    )
+
+
+def _format_settings_validation_error(exc: ValidationError) -> str:
+    """将 Pydantic 的错误压缩为一条稳定、可读的错误消息。"""
+
+    errors = exc.errors(include_url=False)
+    if not errors:
+        return "settings 无效：未知校验错误"
+
+    first: dict[str, Any] = errors[0]
+    loc = first.get("loc", ())
+    if isinstance(loc, tuple) and loc:
+        location = ".".join(str(part) for part in loc)
+    else:
+        location = "settings"
+    message = str(first.get("msg", "")).strip()
+    if message:
+        return f"{location} 无效：{message}"
+    return f"{location} 无效"
+
 
 __all__ = [
-    "generator_config_from_settings",
+    "ProgressMilestones",
+    "RunSettingsSnapshot",
     "require_settings_snapshot",
 ]

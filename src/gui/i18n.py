@@ -5,10 +5,10 @@ import os
 from typing import Any
 
 from localization import LOCALIZATION_STRINGS
-from settings import require_supported_language
+from localization import require_supported_language_code
 
 
-def t(key: str, lang: str | None = None, **kwargs: Any) -> str:
+def t(key: str, lang: str | None = None, /, **kwargs: Any) -> str:
     """Translate a string key using LOCALIZATION_STRINGS.
 
     - Falls back to English when a translation key is missing.
@@ -19,7 +19,7 @@ def t(key: str, lang: str | None = None, **kwargs: Any) -> str:
     if lang is None:
         lang_code = "english"
     else:
-        lang_code = require_supported_language(lang, field_name="lang")
+        lang_code = require_supported_language_code(lang, field_name="lang")
 
     lang_dict = LOCALIZATION_STRINGS.get(lang_code) or LOCALIZATION_STRINGS.get(
         "english", {}

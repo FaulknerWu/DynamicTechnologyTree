@@ -148,6 +148,10 @@ def main() -> None:
     import pathlib
     import sys
 
+    from localization import initialize_metadata_defaults
+
+    initialize_metadata_defaults()
+
     md = generate_reference_markdown()
     out = (
         pathlib.Path(__file__).resolve().parent.parent

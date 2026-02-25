@@ -75,6 +75,10 @@ def _resolve_runtime_paths() -> RuntimePaths:
 
 
 def main() -> int:
+    from localization import initialize_metadata_defaults
+
+    initialize_metadata_defaults()
+
     paths = _resolve_runtime_paths()
 
     app = QApplication(sys.argv)

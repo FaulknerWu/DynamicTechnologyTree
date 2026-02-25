@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, ClassVar, cast, get_args
+from typing import Any, ClassVar
 
 from pydantic import (  # pyright: ignore[reportMissingImports]
     BaseModel,
@@ -25,6 +25,10 @@ from config import (
     DEFAULT_LOCALISATION_REPLACE_PREFIX,
     DEFAULT_LOCALISATION_ROOT,
     DEFAULT_MULTI_ACTIVE_PLAYSET_SELECTION_POLICY,
+    DEFAULT_OUTPUT_ON_EXISTING_FILE,
+    DEFAULT_OUTPUT_ON_WRITE_ERROR,
+    DEFAULT_OUTPUT_REPORT_ENCODING,
+    DEFAULT_OUTPUT_YML_ENCODING,
     DEFAULT_OVERLONG_TREE_ROOT_LOG_LIMIT,
     DEFAULT_SAVE_READER_MAX_MEMBER_UNCOMPRESSED_SIZE_BYTES,
     DEFAULT_SAVE_READER_MAX_PARSE_DIAGNOSTICS_PER_MEMBER,
@@ -33,62 +37,24 @@ from config import (
     DEFAULT_TECHNOLOGY_ROOT,
     DEFAULT_YML_OUTPUT_TARGETS,
     DecodeFailurePolicy,
+    ExistingFilePolicy,
     MultiActivePlaysetSelectionPolicy,
+    OutputWriteErrorPolicy,
 )
-from localization import LOCALIZATION_STRINGS
+from localization import (
+    DEFAULT_LANGUAGE_CODE,
+    SUPPORTED_LANGUAGE_CODES,
+    require_supported_language_code,
+)
 
 
-def _ui_meta(
-    *,
-    tab: str,
-    group: str,
-    label_key: str,
-    help_key: str,
-) -> dict[str, Any]:
+def _ui_meta(*, tab: str, group: str, label_key: str, help_key: str) -> dict[str, Any]:
     return {
         "tab": tab,
         "group": group,
         "label_key": label_key,
         "help_key": help_key,
     }
-
-
-SUPPORTED_LANGUAGES = tuple(sorted(LOCALIZATION_STRINGS.keys()))
-SUPPORTED_LANGUAGE_SET = set(SUPPORTED_LANGUAGES)
-if not SUPPORTED_LANGUAGES:
-    raise RuntimeError("LOCALIZATION_STRINGS must define at least one language")
-
-
-def require_supported_language(
-    value: str,
-    *,
-    field_name: str = "settings.localization.language",
-) -> str:
-    language = str(value).strip().lower()
-    if language in SUPPORTED_LANGUAGE_SET:
-        return language
-
-    raise ValueError(
-        f"{field_name} must be one of {', '.join(SUPPORTED_LANGUAGES)}; got {value!r}"
-    )
-
-
-DEFAULT_LANGUAGE = (
-    "simp_chinese"
-    if "simp_chinese" in SUPPORTED_LANGUAGE_SET
-    else SUPPORTED_LANGUAGES[0]
-)
-
-
-_DECODE_FAILURE_POLICIES: tuple[str, ...] = (
-    "replace",
-    "strict",
-)
-
-
-_MULTI_ACTIVE_PLAYSET_SELECTION_POLICIES: tuple[str, ...] = tuple(
-    str(value) for value in get_args(MultiActivePlaysetSelectionPolicy)
-)
 
 
 def _normalize_encoding_list(value: list[str], *, field_name: str) -> list[str]:
@@ -313,35 +279,18 @@ class FileIndexingSettings(_StrictModel):
 class LoadOrderSettings(_StrictModel):
     multi_active_playset_selection_policy: MultiActivePlaysetSelectionPolicy = Field(
         default=DEFAULT_MULTI_ACTIVE_PLAYSET_SELECTION_POLICY,
-        json_schema_extra={
-            **_ui_meta(
-                tab="ui_tab_paths",
-                group="load_order",
-                label_key="ui_label_load_order_multi_active_playset_selection_policy",
-                help_key="ui_help_load_order_multi_active_playset_selection_policy",
-            ),
-            "enum": list(_MULTI_ACTIVE_PLAYSET_SELECTION_POLICIES),
-        },
+        json_schema_extra=_ui_meta(
+            tab="ui_tab_paths",
+            group="load_order",
+            label_key="ui_label_load_order_multi_active_playset_selection_policy",
+            help_key="ui_help_load_order_multi_active_playset_selection_policy",
+        ),
     )
-
-    @field_validator("multi_active_playset_selection_policy")
-    @classmethod
-    def _validate_multi_active_playset_selection_policy(
-        cls,
-        value: str,
-    ) -> MultiActivePlaysetSelectionPolicy:
-        policy = str(value).strip().lower()
-        if policy in _MULTI_ACTIVE_PLAYSET_SELECTION_POLICIES:
-            return cast(MultiActivePlaysetSelectionPolicy, policy)
-        raise ValueError(
-            "multi_active_playset_selection_policy must be one of "
-            f"{', '.join(_MULTI_ACTIVE_PLAYSET_SELECTION_POLICIES)}"
-        )
 
 
 class LocalizationSettings(_StrictModel):
-    language: str = Field(
-        default=DEFAULT_LANGUAGE,
+    target_language_code: str = Field(
+        default=DEFAULT_LANGUAGE_CODE,
         json_schema_extra={
             **_ui_meta(
                 tab="ui_tab_localization",
@@ -349,14 +298,14 @@ class LocalizationSettings(_StrictModel):
                 label_key="ui_label_language",
                 help_key="ui_help_language",
             ),
-            "enum": list(SUPPORTED_LANGUAGES),
+            "enum": list(SUPPORTED_LANGUAGE_CODES),
         },
     )
 
-    @field_validator("language")
+    @field_validator("target_language_code")
     @classmethod
-    def _validate_language(cls, value: str) -> str:
-        return require_supported_language(value, field_name="language")
+    def _validate_target_language_code(cls, value: str) -> str:
+        return require_supported_language_code(value, field_name="target_language_code")
 
 
 class DisplaySettings(_StrictModel):
@@ -442,15 +391,12 @@ class DecodeSettings(_StrictModel):
     )
     on_failure: DecodeFailurePolicy = Field(
         default="replace",
-        json_schema_extra={
-            **_ui_meta(
-                tab="ui_tab_output",
-                group="decode",
-                label_key="ui_label_decode_on_failure",
-                help_key="ui_help_decode_on_failure",
-            ),
-            "enum": list(_DECODE_FAILURE_POLICIES),
-        },
+        json_schema_extra=_ui_meta(
+            tab="ui_tab_output",
+            group="decode",
+            label_key="ui_label_decode_on_failure",
+            help_key="ui_help_decode_on_failure",
+        ),
     )
 
     @field_validator("preferred_encodings", "fallback_encodings")
@@ -470,17 +416,6 @@ class DecodeSettings(_StrictModel):
         if not encoding:
             raise ValueError("replacement_encoding must be non-empty")
         return encoding
-
-    @field_validator("on_failure")
-    @classmethod
-    def _validate_on_failure(cls, value: str) -> DecodeFailurePolicy:
-        policy = str(value).strip().lower()
-        if policy in _DECODE_FAILURE_POLICIES:
-            return cast(DecodeFailurePolicy, policy)
-        raise ValueError(
-            f"on_failure must be one of {', '.join(_DECODE_FAILURE_POLICIES)}"
-        )
-
 
 _MAX_INT32 = (2**31) - 1
 
@@ -562,19 +497,6 @@ class DiagnosticsSettings(_StrictModel):
         ),
     )
 
-_OUTPUT_WRITE_ERROR_POLICIES: tuple[str, ...] = (
-    "warn_and_continue",
-    "fail_fast",
-)
-
-
-_OUTPUT_EXISTING_FILE_POLICIES: tuple[str, ...] = (
-    "overwrite",
-    "skip",
-    "fail",
-)
-
-
 class OutputSettings(_StrictModel):
     yml_targets: list[str] = Field(
         default_factory=lambda: list(DEFAULT_YML_OUTPUT_TARGETS),
@@ -589,7 +511,7 @@ class OutputSettings(_StrictModel):
         },
     )
     yml_encoding: str = Field(
-        default="utf-8-sig",
+        default=DEFAULT_OUTPUT_YML_ENCODING,
         json_schema_extra=_ui_meta(
             tab="ui_tab_output",
             group="output",
@@ -598,7 +520,7 @@ class OutputSettings(_StrictModel):
         ),
     )
     report_encoding: str = Field(
-        default="utf-8",
+        default=DEFAULT_OUTPUT_REPORT_ENCODING,
         json_schema_extra=_ui_meta(
             tab="ui_tab_output",
             group="output",
@@ -628,29 +550,23 @@ class OutputSettings(_StrictModel):
             help_key="ui_help_output_eligibility_unknown_warning_threshold",
         ),
     )
-    on_write_error: str = Field(
-        default="warn_and_continue",
-        json_schema_extra={
-            **_ui_meta(
-                tab="ui_tab_output",
-                group="output",
-                label_key="ui_label_on_write_error",
-                help_key="ui_help_on_write_error",
-            ),
-            "enum": list(_OUTPUT_WRITE_ERROR_POLICIES),
-        },
+    on_write_error: OutputWriteErrorPolicy = Field(
+        default=DEFAULT_OUTPUT_ON_WRITE_ERROR,
+        json_schema_extra=_ui_meta(
+            tab="ui_tab_output",
+            group="output",
+            label_key="ui_label_on_write_error",
+            help_key="ui_help_on_write_error",
+        ),
     )
-    on_existing_file: str = Field(
-        default="overwrite",
-        json_schema_extra={
-            **_ui_meta(
-                tab="ui_tab_output",
-                group="output",
-                label_key="ui_label_on_existing_file",
-                help_key="ui_help_on_existing_file",
-            ),
-            "enum": list(_OUTPUT_EXISTING_FILE_POLICIES),
-        },
+    on_existing_file: ExistingFilePolicy = Field(
+        default=DEFAULT_OUTPUT_ON_EXISTING_FILE,
+        json_schema_extra=_ui_meta(
+            tab="ui_tab_output",
+            group="output",
+            label_key="ui_label_on_existing_file",
+            help_key="ui_help_on_existing_file",
+        ),
     )
 
     @field_validator("yml_targets")
@@ -661,27 +577,6 @@ class OutputSettings(_StrictModel):
         for item in value:
             normalized.append(str(item).strip())
         return normalized
-
-    @field_validator("on_write_error")
-    @classmethod
-    def _validate_on_write_error(cls, value: str) -> str:
-        policy = str(value).strip().lower()
-        if policy in _OUTPUT_WRITE_ERROR_POLICIES:
-            return policy
-        raise ValueError(
-            f"on_write_error must be one of {', '.join(_OUTPUT_WRITE_ERROR_POLICIES)}"
-        )
-
-    @field_validator("on_existing_file")
-    @classmethod
-    def _validate_on_existing_file(cls, value: str) -> str:
-        policy = str(value).strip().lower()
-        if policy in _OUTPUT_EXISTING_FILE_POLICIES:
-            return policy
-        raise ValueError(
-            f"on_existing_file must be one of {', '.join(_OUTPUT_EXISTING_FILE_POLICIES)}"
-        )
-
 
 class ProgressMilestonesSettings(_StrictModel):
     _PREVIOUS_MILESTONE: ClassVar[dict[str, str]] = {
@@ -946,7 +841,6 @@ def settings_json_schema() -> dict[str, Any]:
 
 
 __all__ = [
-    "DEFAULT_LANGUAGE",
     "DecodeSettings",
     "DiagnosticsSettings",
     "DisplaySettings",
@@ -958,8 +852,6 @@ __all__ = [
     "ProgressMilestonesSettings",
     "OutputSettings",
     "SaveReaderSettings",
-    "require_supported_language",
-    "SUPPORTED_LANGUAGES",
     "Settings",
     "settings_json_schema",
 ]
