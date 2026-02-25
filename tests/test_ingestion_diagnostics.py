@@ -32,7 +32,7 @@ def _build_pipeline(
 
 def _record_many_examples(pipeline: IntegratedIngestionPipeline, *, count: int) -> None:
     for index in range(count):
-        pipeline._record_tech_example(f"path-{index}", f"error-{index}")
+        pipeline._record_example(pipeline.report.tech_examples, f"path-{index}", f"error-{index}")
 
 
 def test_ingestion_pipeline_default_diagnostics_cap_records_ten_examples_per_stage() -> (
@@ -42,7 +42,7 @@ def test_ingestion_pipeline_default_diagnostics_cap_records_ten_examples_per_sta
 
     _record_many_examples(pipeline, count=25)
     for index in range(25):
-        pipeline._record_localisation_example(f"loc-{index}", f"loc-error-{index}")
+        pipeline._record_example(pipeline.report.localisation_examples, f"loc-{index}", f"loc-error-{index}")
 
     assert pipeline.config.ingestion.diagnostic_example_limit == 10
     assert len(pipeline.report.tech_examples) == 10
@@ -59,7 +59,7 @@ def test_ingestion_diagnostics_custom_cap_reduces_examples_deterministically() -
 
     _record_many_examples(pipeline, count=25)
     for index in range(25):
-        pipeline._record_localisation_example(f"loc-{index}", f"loc-error-{index}")
+        pipeline._record_example(pipeline.report.localisation_examples, f"loc-{index}", f"loc-error-{index}")
 
     assert pipeline.config.ingestion.diagnostic_example_limit == 3
     assert len(pipeline.report.tech_examples) == 3

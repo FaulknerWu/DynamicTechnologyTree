@@ -1,16 +1,20 @@
+from __future__ import annotations
+
 from collections.abc import Callable
 
 from dtt_core.events import (
+    EventEmitterMixin,
     EventKind,
     EventSink,
-    GenerationEvent,
-    NullEventSink,
     StageId,
 )
 from models import Technology
 
 
-class CycleDetector:
+class CycleDetector(EventEmitterMixin):
+
+    _STAGE_ID = StageId.CYCLES
+
     def __init__(
         self,
         all_technologies: dict[str, Technology],
@@ -19,21 +23,7 @@ class CycleDetector:
     ) -> None:
         self.all_technologies = all_technologies
         self._l = localize
-        self._event_sink: EventSink = (
-            event_sink if event_sink is not None else NullEventSink()
-        )
-
-    def set_event_sink(self, event_sink: EventSink | None) -> None:
-        self._event_sink = event_sink if event_sink is not None else NullEventSink()
-
-    def _emit(self, kind: EventKind, message: str) -> None:
-        self._event_sink.emit(
-            GenerationEvent(
-                stage_id=StageId.CYCLES,
-                kind=kind,
-                message=message,
-            )
-        )
+        self._init_event_sink(event_sink)
 
     def detect_circular_dependencies(self) -> list[list[str]]:
         cycles: list[list[str]] = []

@@ -10,10 +10,9 @@ from typing import TypedDict
 from config import DecodeFailurePolicy, GeneratorConfig
 from dtt_core.clausewitz_parser import parse
 from dtt_core.events import (
+    EventEmitterMixin,
     EventKind,
     EventSink,
-    GenerationEvent,
-    NullEventSink,
     StageId,
 )
 from dtt_core.file_decode import format_decode_warning, read_text_with_diagnostics
@@ -61,7 +60,8 @@ class IngestionReport:
     localisation_examples: list[tuple[str, str]] = field(default_factory=list)
 
 
-class IntegratedIngestionPipeline:
+class IntegratedIngestionPipeline(EventEmitterMixin):
+    _STAGE_ID = StageId.INGEST_TECH
     _VANILLA_SOURCE_ID = "vanilla"
 
     def __init__(
@@ -81,9 +81,7 @@ class IntegratedIngestionPipeline:
         self.base_game_tech_ids = base_game_tech_ids
         self.tech_descriptions = tech_descriptions
         self.merged_tech_definitions = merged_tech_definitions
-        self._event_sink: EventSink = (
-            event_sink if event_sink is not None else NullEventSink()
-        )
+        self._init_event_sink(event_sink)
         self._cancel_event: Event | None = None
         self._swap_variant_ids: set[str] = set()
 
@@ -102,9 +100,6 @@ class IntegratedIngestionPipeline:
     def report(self) -> IngestionReport:
         return self._report
 
-    def set_event_sink(self, event_sink: EventSink | None) -> None:
-        self._event_sink = event_sink if event_sink is not None else NullEventSink()
-
     def apply_config(self, config: GeneratorConfig) -> None:
         """Apply a new settings snapshot.
 
@@ -122,15 +117,6 @@ class IntegratedIngestionPipeline:
 
     def set_cancel_event(self, cancel_event: Event | None) -> None:
         self._cancel_event = cancel_event
-
-    def _emit(self, stage_id: StageId, kind: EventKind, message: str) -> None:
-        self._event_sink.emit(
-            GenerationEvent(
-                stage_id=stage_id,
-                kind=kind,
-                message=message,
-            )
-        )
 
     def scan_all_technology_files(self) -> None:
         self.all_technologies.clear()
@@ -202,7 +188,7 @@ class IntegratedIngestionPipeline:
                 if len(self._report.localisation_examples) >= self._diagnostic_example_limit:
                     break
                 seen_paths.add(diag.path)
-                self._record_localisation_example(str(diag.path), diag.message)
+                self._record_example(self._report.localisation_examples, str(diag.path), diag.message)
 
         self._report.localization_override_count = merge_result.override_count
 
@@ -270,21 +256,21 @@ class IntegratedIngestionPipeline:
 
         if missing_mod_dirs:
             self._emit(
-                StageId.LOAD_ORDER,
                 EventKind.WARNING,
                 self._l("msg_missing_mod_dirs", count=missing_mod_dirs),
+                stage_id=StageId.LOAD_ORDER,
             )
         self._emit(
-            StageId.LOAD_ORDER,
             EventKind.LOG,
             self._l("msg_enabled_mods_count", count=max(0, len(sources) - 1)),
+            stage_id=StageId.LOAD_ORDER,
         )
 
         for warning in resolution.warnings:
             self._emit(
-                StageId.LOAD_ORDER,
                 EventKind.WARNING,
                 f"Warning: {warning}",
+                stage_id=StageId.LOAD_ORDER,
             )
 
         return manifest
@@ -302,7 +288,7 @@ class IntegratedIngestionPipeline:
             )
         except OSError as exc:
             self._report.tech_files_failed += 1
-            self._record_tech_example(str(file_path), f"{type(exc).__name__}: {exc}")
+            self._record_example(self._report.tech_examples, str(file_path), f"{type(exc).__name__}: {exc}")
             return
 
         if decoded.diagnostics.has_warning:
@@ -312,7 +298,7 @@ class IntegratedIngestionPipeline:
         if parsed.diagnostics:
             self._report.tech_files_with_parse_diagnostics += 1
             self._report.tech_parse_diagnostic_count += len(parsed.diagnostics)
-            self._record_tech_example(str(file_path), parsed.diagnostics[0].format())
+            self._record_example(self._report.tech_examples, str(file_path), parsed.diagnostics[0].format())
 
         extracted = self._extractor.extract_from_root(
             parsed.root, source=str(file_path)
@@ -382,15 +368,13 @@ class IntegratedIngestionPipeline:
         needle = f"l_{language_code}".casefold()
         return needle in file_ref.relative_path.casefold()
 
-    def _record_tech_example(self, path: str, message: str) -> None:
-        if len(self._report.tech_examples) >= self._diagnostic_example_limit:
+    def _record_example(
+        self, examples: list[tuple[str, str]], path: str, message: str
+    ) -> None:
+        """将诊断示例追加到目标列表，受限于最大诊断示例数。"""
+        if len(examples) >= self._diagnostic_example_limit:
             return
-        self._report.tech_examples.append((path, message))
-
-    def _record_localisation_example(self, path: str, message: str) -> None:
-        if len(self._report.localisation_examples) >= self._diagnostic_example_limit:
-            return
-        self._report.localisation_examples.append((path, message))
+        examples.append((path, message))
 
     def _decode_read_kwargs(self) -> _DecodeReadKwargs:
         decode = self.config.decode
@@ -402,70 +386,68 @@ class IntegratedIngestionPipeline:
         }
         return kwargs
 
-    def _print_tech_report(self) -> None:
-        total = self._report.tech_files_total
-        failed = (
-            self._report.tech_files_failed
-            + self._report.tech_files_with_parse_diagnostics
-        )
-        shown = min(len(self._report.tech_examples), self._diagnostic_example_limit)
+    def _print_parse_report(
+        self,
+        *,
+        stage_id: StageId | None,
+        total: int,
+        failed: int,
+        examples: list[tuple[str, str]],
+        summary_key: str,
+        example_key: str,
+        override_notice: str,
+    ) -> None:
+        """输出解析报告——tech 和 localization 共用同构逻辑。"""
+        shown = min(len(examples), self._diagnostic_example_limit)
         suppressed = max(failed - shown, 0)
         ok = max(total - failed, 0)
 
         self._emit(
-            StageId.INGEST_TECH,
             EventKind.WARNING,
             self._l(
-                "warn_tech_parse_summary",
+                summary_key,
                 total=total,
                 ok=ok,
                 failed=failed,
                 shown=shown,
                 suppressed=suppressed,
             ),
+            stage_id=stage_id,
         )
-        for path, error in self._report.tech_examples[: self._diagnostic_example_limit]:
+        for path, error in examples[: self._diagnostic_example_limit]:
             self._emit(
-                StageId.INGEST_TECH,
                 EventKind.WARNING,
-                self._l("warn_tech_parse_failure_example", path=path, error=error),
+                self._l(example_key, path=path, error=error),
+                stage_id=stage_id,
             )
-        self._emit(
-            StageId.INGEST_TECH,
-            EventKind.LOG,
-            f"Notice: tech overrides applied: {self._report.tech_override_count}",
+        self._emit(EventKind.LOG, override_notice, stage_id=stage_id)
+
+    def _print_tech_report(self) -> None:
+        self._print_parse_report(
+            stage_id=None,
+            total=self._report.tech_files_total,
+            failed=(
+                self._report.tech_files_failed
+                + self._report.tech_files_with_parse_diagnostics
+            ),
+            examples=self._report.tech_examples,
+            summary_key="warn_tech_parse_summary",
+            example_key="warn_tech_parse_failure_example",
+            override_notice=f"Notice: tech overrides applied: {self._report.tech_override_count}",
         )
 
     def _print_localization_report(self) -> None:
-        total = self._report.localization_files_total
-        failed = self._report.localization_files_with_diagnostics
-        shown = min(len(self._report.localisation_examples), self._diagnostic_example_limit)
-        suppressed = max(failed - shown, 0)
-        ok = max(total - failed, 0)
-
-        self._emit(
-            StageId.INGEST_L10N,
-            EventKind.WARNING,
-            self._l(
-                "warn_loc_parse_summary",
-                total=total,
-                ok=ok,
-                failed=failed,
-                shown=shown,
-                suppressed=suppressed,
+        self._print_parse_report(
+            stage_id=StageId.INGEST_L10N,
+            total=self._report.localization_files_total,
+            failed=self._report.localization_files_with_diagnostics,
+            examples=self._report.localisation_examples,
+            summary_key="warn_loc_parse_summary",
+            example_key="warn_loc_parse_failure_example",
+            override_notice=(
+                "Notice: localisation overrides applied: "
+                f"{self._report.localization_override_count}"
             ),
-        )
-        for path, error in self._report.localisation_examples[: self._diagnostic_example_limit]:
-            self._emit(
-                StageId.INGEST_L10N,
-                EventKind.WARNING,
-                self._l("warn_loc_parse_failure_example", path=path, error=error),
-            )
-        self._emit(
-            StageId.INGEST_L10N,
-            EventKind.LOG,
-            "Notice: localisation overrides applied: "
-            f"{self._report.localization_override_count}",
         )
 
     def _resolve_mod_root(self, entry: ResolvedModEntry) -> Path | None:
@@ -474,14 +456,19 @@ class IntegratedIngestionPipeline:
                 return candidate
         return None
 
-    def _candidate_mod_roots(self, entry: ResolvedModEntry) -> list[Path]:
-        workshop_root = Path(self.config.paths.mod_folder_path).expanduser()
+    def _resolve_mod_paths(self) -> tuple[Path, Path]:
+        """从配置解析 user_data_root 和 local_mod_root，消除重复计算。"""
         user_data_root = Path(self.config.paths.launcher_db_path).expanduser().parent
         local_mod_root = (
             Path(self.config.paths.local_mod_folder_path).expanduser()
             if self.config.paths.local_mod_folder_path
             else user_data_root / "mod"
         )
+        return user_data_root, local_mod_root
+
+    def _candidate_mod_roots(self, entry: ResolvedModEntry) -> list[Path]:
+        workshop_root = Path(self.config.paths.mod_folder_path).expanduser()
+        user_data_root, local_mod_root = self._resolve_mod_paths()
 
         candidates: list[Path] = []
 
@@ -533,26 +520,26 @@ class IntegratedIngestionPipeline:
                 )
             except Exception as exc:
                 self._emit(
-                    StageId.LOAD_ORDER,
                     EventKind.WARNING,
                     f"Warning: mod descriptor read failed: {descriptor_path}: {exc}",
+                    stage_id=StageId.LOAD_ORDER,
                 )
                 continue
             for diagnostic in descriptor.parse_diagnostics[:1]:
                 self._emit(
-                    StageId.LOAD_ORDER,
                     EventKind.WARNING,
                     f"Warning: mod descriptor diagnostic: {descriptor_path}: {diagnostic.format()}",
+                    stage_id=StageId.LOAD_ORDER,
                 )
             if (
                 descriptor.decode_diagnostics is not None
                 and descriptor.decode_diagnostics.has_warning
             ):
                 self._emit(
-                    StageId.LOAD_ORDER,
                     EventKind.WARNING,
                     f"Warning: mod descriptor decode warning: {descriptor_path}: "
                     f"{format_decode_warning(descriptor.decode_diagnostics)}",
+                    stage_id=StageId.LOAD_ORDER,
                 )
             if descriptor.replace_paths:
                 return descriptor.replace_paths
@@ -564,13 +551,7 @@ class IntegratedIngestionPipeline:
         root_path: Path,
     ) -> tuple[Path, ...]:
         candidates: list[Path] = [root_path / "descriptor.mod"]
-
-        user_data_root = Path(self.config.paths.launcher_db_path).expanduser().parent
-        local_mod_root = (
-            Path(self.config.paths.local_mod_folder_path).expanduser()
-            if self.config.paths.local_mod_folder_path
-            else user_data_root / "mod"
-        )
+        _, local_mod_root = self._resolve_mod_paths()
 
         raw_name = Path(entry.raw_entry).name if entry.raw_entry else ""
         if raw_name.endswith(".mod"):

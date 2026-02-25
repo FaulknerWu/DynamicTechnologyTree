@@ -3,17 +3,12 @@ from pathlib import Path
 from threading import Event
 from collections.abc import Callable, Mapping, Sequence
 
-from config import (
-    DEFAULT_ELIGIBILITY_SAMPLE_SIZE,
-    DEFAULT_ELIGIBILITY_UNKNOWN_WARNING_THRESHOLD,
-    DEFAULT_YML_OUTPUT_TARGETS,
-)
+from config import GeneratorConfig
 from dtt_core.eligibility import EligibilityReport, build_allowed_tech_ids_for_empire
 from dtt_core.events import (
+    EventEmitterMixin,
     EventKind,
     EventSink,
-    GenerationEvent,
-    NullEventSink,
     StageId,
 )
 from dtt_core.swap_resolver import (
@@ -122,7 +117,7 @@ class _OutputPlanBuilder:
         *,
         all_technologies: Mapping[str, Technology],
         tech_descriptions: Mapping[str, Mapping[str, str]],
-        config,
+        config: GeneratorConfig,
         generate_tech_tree_content: Callable[..., str],
         merged_tech_definitions: Mapping[str, MergedTechDefinition],
         trigger_evaluator: TriggerEvaluator,
@@ -190,24 +185,13 @@ class _OutputPlanBuilder:
         )
 
     def _build_allowed_tech_ids(self) -> tuple[set[str], EligibilityReport]:
-        output = getattr(self._config, "output", None)
-        sample_size = getattr(
-            output,
-            "eligibility_sample_size",
-            DEFAULT_ELIGIBILITY_SAMPLE_SIZE,
-        )
-        unknown_warning_threshold = getattr(
-            output,
-            "eligibility_unknown_warning_threshold",
-            DEFAULT_ELIGIBILITY_UNKNOWN_WARNING_THRESHOLD,
-        )
         return build_allowed_tech_ids_for_empire(
             self._all_technologies,
             self._empire_profile,
             self._merged_tech_definitions,
             evaluator=self._trigger_evaluator,
-            sample_size=sample_size,
-            unknown_warning_threshold=unknown_warning_threshold,
+            sample_size=self._config.output.eligibility_sample_size,
+            unknown_warning_threshold=self._config.output.eligibility_unknown_warning_threshold,
         )
 
     def _build_display_overrides(self) -> tuple[dict[str, str], SwapResolutionReport]:
@@ -404,7 +388,7 @@ class _OutputPlanWriter:
     def __init__(
         self,
         *,
-        config,
+        config: GeneratorConfig,
         localize: Callable[..., str],
         emit: Callable[..., None],
         artifact_summary: ArtifactWriteSummary,
@@ -426,9 +410,8 @@ class _OutputPlanWriter:
         return self._cancel_event is not None and self._cancel_event.is_set()
 
     def _write_text_file(self, file_path: Path, content: str, *, encoding: str) -> None:
-        output = getattr(self._config, "output", None)
-        on_write_error = getattr(output, "on_write_error", "warn_and_continue")
-        on_existing_file = getattr(output, "on_existing_file", "overwrite")
+        on_write_error = self._config.output.on_write_error
+        on_existing_file = self._config.output.on_existing_file
 
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -474,13 +457,15 @@ class _OutputPlanWriter:
                 raise
 
 
-class OutputWriter:
+class OutputWriter(EventEmitterMixin):
+    _STAGE_ID = StageId.WRITE_OUTPUT
+
     def __init__(
         self,
         *,
         all_technologies: dict[str, Technology],
         tech_descriptions: dict[str, dict[str, str]],
-        config,
+        config: GeneratorConfig,
         localize: Callable[..., str],
         generate_tech_tree_content: Callable[..., str],
         merged_tech_definitions: Mapping[str, MergedTechDefinition] | None = None,
@@ -494,8 +479,8 @@ class OutputWriter:
         self.config = config
         self._localize = localize
         self.generate_tech_tree_content = generate_tech_tree_content
-        # Reference the shared mapping that ingestion mutates per run.
-        # Copying here silently disconnects save-driven eligibility/swap logic.
+        # 引用 ingestion 每次运行时变更的共享映射。
+        # 在此处复制会默默断开存档驱动的资格/交换逻辑。
         self.merged_tech_definitions = (
             merged_tech_definitions if merged_tech_definitions is not None else {}
         )
@@ -506,9 +491,7 @@ class OutputWriter:
         self.application_root = (
             Path(application_root) if application_root is not None else None
         )
-        self._event_sink: EventSink = (
-            event_sink if event_sink is not None else NullEventSink()
-        )
+        self._init_event_sink(event_sink)
         self._cancel_event: Event | None = None
         self.eligibility_report = EligibilityReport()
         self.swap_resolution_report = SwapResolutionReport()
@@ -519,40 +502,15 @@ class OutputWriter:
             return Path("localisation")
         return self.application_root / "localisation"
 
-    def set_event_sink(self, event_sink: EventSink | None) -> None:
-        self._event_sink = event_sink if event_sink is not None else NullEventSink()
-
     def set_cancel_event(self, cancel_event: Event | None) -> None:
         self._cancel_event = cancel_event
 
     def _is_cancelled(self) -> bool:
         return self._cancel_event is not None and self._cancel_event.is_set()
 
-    def _emit(
-        self,
-        kind: EventKind,
-        message: str,
-        *,
-        artifact_path: str | None = None,
-        details: tuple[tuple[str, str], ...] = (),
-    ) -> None:
-        self._event_sink.emit(
-            GenerationEvent(
-                stage_id=StageId.WRITE_OUTPUT,
-                kind=kind,
-                message=message,
-                artifact_path=artifact_path,
-                details=details,
-            )
-        )
-
     def generate_all_yml_files(self) -> OutputWriteResult:
         self.artifact_summary = ArtifactWriteSummary()
-        output = getattr(self.config, "output", None)
-        yml_targets = getattr(output, "yml_targets", DEFAULT_YML_OUTPUT_TARGETS)
-        yml_encoding = getattr(output, "yml_encoding", "utf-8-sig")
-        report_encoding = getattr(output, "report_encoding", "utf-8")
-        on_write_error = getattr(output, "on_write_error", "warn_and_continue")
+        output_config = self.config.output
 
         builder = _OutputPlanBuilder(
             all_technologies=self.all_technologies,
@@ -563,9 +521,9 @@ class OutputWriter:
             trigger_evaluator=self.trigger_evaluator,
             empire_profile=self.empire_profile,
             localisation_root=self._localisation_root(),
-            yml_targets=yml_targets,
-            yml_encoding=yml_encoding,
-            report_encoding=report_encoding,
+            yml_targets=output_config.yml_targets,
+            yml_encoding=output_config.yml_encoding,
+            report_encoding=output_config.report_encoding,
         )
         plan = builder.build_plan()
         self.eligibility_report = plan.eligibility_report
@@ -580,7 +538,7 @@ class OutputWriter:
                     error=failure.error,
                 ),
             )
-            if on_write_error == "fail_fast":
+            if output_config.on_write_error == "fail_fast":
                 raise failure.error
 
         if plan.missing_description_count > 0:

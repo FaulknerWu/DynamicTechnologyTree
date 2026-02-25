@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import Event
 from collections.abc import Callable
 
-from dtt_core.events import EventKind, EventSink, GenerationEvent, StageId
+from dtt_core.events import EventEmitterMixin, EventKind, EventSink, StageId
 from dtt_core.output import OutputWriteResult
 from dtt_core.prepared_run import AmbiguousPlayerEmpireError, prepare_run
 from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
@@ -45,7 +45,9 @@ class _Stage:
     cancel_progress_after_action: int | None = None
 
 
-class GenerateLocalizationUseCase:
+class GenerateLocalizationUseCase(EventEmitterMixin):
+    _STAGE_ID = StageId.SAVE_PARSE
+
     def __init__(
         self,
         *,
@@ -54,7 +56,7 @@ class GenerateLocalizationUseCase:
         steps: GenerationSteps,
     ) -> None:
         self._l = localize
-        self._event_sink = event_sink
+        self._init_event_sink(event_sink)
         self._steps = steps
 
     def run(
@@ -123,9 +125,9 @@ class GenerateLocalizationUseCase:
             nonlocal last_progress
             last_progress = progress
             self._emit(
-                StageId.DONE,
                 EventKind.PROGRESS,
                 self._l("msg_generation_done"),
+                stage_id=StageId.DONE,
                 progress=progress,
             )
             artifact_summary = (
@@ -150,9 +152,9 @@ class GenerateLocalizationUseCase:
             nonlocal last_progress
             last_progress = stage.progress
             self._emit(
-                stage.stage_id,
                 EventKind.PROGRESS,
                 stage.message,
+                stage_id=stage.stage_id,
                 progress=stage.progress,
                 details=stage.details,
             )
@@ -308,24 +310,6 @@ class GenerateLocalizationUseCase:
             progress=progress_milestones.done,
         )
 
-    def _emit(
-        self,
-        stage_id: StageId,
-        kind: EventKind,
-        message: str,
-        *,
-        progress: int | None = None,
-        details: tuple[tuple[str, str], ...] = (),
-    ) -> None:
-        self._event_sink.emit(
-            GenerationEvent(
-                stage_id=stage_id,
-                kind=kind,
-                message=message,
-                progress=progress,
-                details=details,
-            )
-        )
 
 
 __all__ = ["GenerationSteps", "GenerateLocalizationUseCase"]
