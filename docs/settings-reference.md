@@ -1,47 +1,47 @@
-# Settings Reference
+# 配置参考
 
-Auto-generated from the Settings schema. Do not edit by hand.
+由 Settings schema 自动生成，请勿手动编辑。
 
-Re-generate with:
+重新生成：
 
 ```bash
 python -m settings_reference
 ```
 
-## Paths
+## 路径设置
 
-| Field | Label | Description | Default |
-|-------|-------|-------------|---------|
+| 字段 | 标签 | 说明 | 默认值 |
+|------|------|------|--------|
 | `file_indexing.localisation_glob` | Localisation file glob | Glob pattern used under localisation_root when indexing localisation files. | `"**/*.yml"` |
 | `file_indexing.localisation_replace_prefix` | Localisation replace prefix | Localisation files under this prefix are loaded in a late phase. | `"localisation/replace"` |
 | `file_indexing.localisation_root` | Localisation root (relative) | Relative path under each source root scanned for localisation files. | `"localisation"` |
 | `file_indexing.technology_glob` | Technology file glob | Glob pattern used under technology_root when indexing technology files. | `"*.txt"` |
 | `file_indexing.technology_root` | Technology root (relative) | Relative path under each source root scanned for technology files. | `"common/technology"` |
 | `load_order.multi_active_playset_selection_policy` | Active playset selection policy | How to choose a playset when multiple active playsets are active. | `"latest_created_then_name_then_id"` |
-| `paths.base_game_path` | Game install directory | Directory where Stellaris is installed. | `""` |
+| `paths.base_game_path` | 本体安装目录 | Directory where Stellaris is installed. | `""` |
 | `paths.game_directory_name` | Game directory name | Directory name under steamapps/common used for autodetection. | `"Stellaris"` |
 | `paths.launcher_db_filename` | Launcher database filename | Filename searched under user data path for launcher database. | `"launcher-v2.sqlite"` |
-| `paths.launcher_db_path` | Launcher DB (launcher-v2.sqlite) | Path to launcher-v2.sqlite used to resolve enabled mods. | `""` |
+| `paths.launcher_db_path` | 启动器数据库（launcher-v2.sqlite） | Path to launcher-v2.sqlite used to resolve enabled mods. | `""` |
 | `paths.local_mod_directory_name` | Local mod directory name | Directory searched under user data path for local mods. | `"mod"` |
-| `paths.local_mod_folder_path` | Local MOD directory (optional) | Optional local mod directory outside Steam Workshop. | `""` |
-| `paths.mod_folder_path` | Workshop directory | Steam Workshop directory for Stellaris mods. | `""` |
+| `paths.local_mod_folder_path` | 本地 MOD 目录（可选） | Optional local mod directory outside Steam Workshop. | `""` |
+| `paths.mod_folder_path` | 创意工坊目录 | Steam Workshop directory for Stellaris mods. | `""` |
 | `paths.steam_app_id` | Steam app ID | Workshop app ID used for autodetection. | `"281990"` |
 | `paths.user_data_subpath_components` | User data subpath components | Subpath components under Documents for user data autodetection. | `["Paradox Interactive", "Stellaris"]` |
 
-## Localization
+## 本地化设置
 
-| Field | Label | Description | Default |
-|-------|-------|-------------|---------|
-| `localization.language` | Language | Language used for generated localisation output. | `"simp_chinese"` |
+| 字段 | 标签 | 说明 | 默认值 |
+|------|------|------|--------|
+| `localization.target_language_code` | 语言 | Language used for generated localisation output. | `"simp_chinese"` |
 
-## Display
+## 显示设置
 
-| Field | Label | Description | Default |
-|-------|-------|-------------|---------|
-| `display.max_children_per_node` | Max children per node (0 = unlimited) | Maximum children shown per node (0 means unlimited). | `12` |
-| `display.max_display_nodes` | Max displayed nodes (0 = unlimited) | Maximum nodes rendered in one tree (0 means unlimited). | `128` |
+| 字段 | 标签 | 说明 | 默认值 |
+|------|------|------|--------|
+| `display.max_children_per_node` | 最大子节点数 (0 = 无限制) | Maximum children shown per node (0 means unlimited). | `12` |
+| `display.max_display_nodes` | 最大显示节点数 (0 = 无限制) | Maximum nodes rendered in one tree (0 means unlimited). | `128` |
 | `display.max_prereq_display` | Max additional prerequisites | Maximum extra prerequisites shown before the ellipsis. | `2` |
-| `display.max_tree_depth` | Max tree depth (0 = unlimited) | Maximum tree depth to render (0 means unlimited). | `4` |
+| `display.max_tree_depth` | 最大树深度 (0 = 无限制) | Maximum tree depth to render (0 means unlimited). | `4` |
 | `progress_milestones.cycles` | CYCLES progress | Progress milestone for CYCLES. | `60` |
 | `progress_milestones.done` | DONE progress | Progress milestone for DONE. | `100` |
 | `progress_milestones.ingest_l10n` | INGEST_L10N progress | Progress milestone for INGEST_L10N. | `45` |
@@ -54,8 +54,8 @@ python -m settings_reference
 
 ## Output
 
-| Field | Label | Description | Default |
-|-------|-------|-------------|---------|
+| 字段 | 标签 | 说明 | 默认值 |
+|------|------|------|--------|
 | `decode.fallback_encodings` | Fallback input encodings | Tried after preferred encodings fail. | `["cp1252", "latin-1"]` |
 | `decode.on_failure` | Decode failure policy | Behavior when all configured encodings fail. | `"replace"` |
 | `decode.preferred_encodings` | Preferred input encodings | Tried first when decoding text files. | `["utf-8-sig", "utf-8"]` |
@@ -75,6 +75,6 @@ python -m settings_reference
 
 ## settings
 
-| Field | Label | Description | Default |
-|-------|-------|-------------|---------|
-| `schema_version` | Schema version | Version of the settings schema. | `1` |
+| 字段 | 标签 | 说明 | 默认值 |
+|------|------|------|--------|
+| `schema_version` | Schema version | Version of the settings schema. | `2` |

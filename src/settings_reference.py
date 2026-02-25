@@ -1,9 +1,4 @@
-"""Auto-generate a Settings reference page from the Pydantic schema.
-
-Reads ``settings_json_schema()`` and ``Settings()`` defaults, resolves
-English label/help text from ``LOCALIZATION_STRINGS``, and emits a
-grouped Markdown document.  No Qt dependency required.
-"""
+"""从 Pydantic Schema 自动生成 Settings 参考文档（Markdown）。"""
 
 from __future__ import annotations
 
@@ -73,13 +68,15 @@ def _format_default(value: Any) -> str:
 
 
 def generate_reference_markdown() -> str:
-    from localization import LOCALIZATION_STRINGS
+    from localization import DEFAULT_LANGUAGE_CODE, LOCALIZATION_STRINGS
     from settings import Settings, settings_json_schema
 
     schema = settings_json_schema()
     defaults_obj = Settings()
     defaults = defaults_obj.model_dump(mode="json")
-    english = LOCALIZATION_STRINGS.get("english", {})
+    strings = LOCALIZATION_STRINGS.get(DEFAULT_LANGUAGE_CODE) or LOCALIZATION_STRINGS.get(
+        "english", {}
+    )
 
     leaves = _iter_leaf_fields(schema, root=schema)
 
@@ -90,8 +87,8 @@ def generate_reference_markdown() -> str:
         tab = field_schema.get("tab", "settings")
         label_key = field_schema.get("label_key", "")
         help_key = field_schema.get("help_key", "")
-        label = str(english.get(label_key, label_key))
-        help_text = str(english.get(help_key, help_key))
+        label = str(strings.get(label_key, label_key))
+        help_text = str(strings.get(help_key, help_key))
         default_val = _get_nested(defaults, path)
         formatted_default = _format_default(default_val)
 
@@ -103,11 +100,11 @@ def generate_reference_markdown() -> str:
 
     # Build markdown
     lines: list[str] = [
-        "# Settings Reference",
+        "# 配置参考",
         "",
-        "Auto-generated from the Settings schema. Do not edit by hand.",
+        "由 Settings schema 自动生成，请勿手动编辑。",
         "",
-        "Re-generate with:",
+        "重新生成：",
         "",
         "```bash",
         "python -m settings_reference",
@@ -117,11 +114,11 @@ def generate_reference_markdown() -> str:
 
     sorted_tabs = sorted(by_tab.keys(), key=_tab_sort_key)
     for tab in sorted_tabs:
-        tab_title = english.get(tab, tab)
+        tab_title = strings.get(tab, tab)
         lines.append(f"## {tab_title}")
         lines.append("")
-        lines.append("| Field | Label | Description | Default |")
-        lines.append("|-------|-------|-------------|---------|")
+        lines.append("| 字段 | 标签 | 说明 | 默认值 |")
+        lines.append("|------|------|------|--------|")
         for dotted, label, help_text, default in by_tab[tab]:
             # Escape pipes in cell content
             safe_label = label.replace("|", "\\|")

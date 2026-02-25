@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from threading import Event
 from typing import Any
-from collections.abc import Callable
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -15,7 +15,6 @@ from dtt_core.prepared_run import AmbiguousPlayerEmpireError
 from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
 from dtt_core.sav_reader import SaveReaderError
 from dtt_core.save_context import SaveContext
-from dtt_core.settings_snapshot import require_settings_snapshot
 from gui.i18n import t
 from localization import require_supported_language_code
 from settings import Settings
@@ -82,7 +81,7 @@ class GenerationWorker(QThread):
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self._settings_snapshot = require_settings_snapshot(settings)
+        self._settings_snapshot = settings.model_copy(deep=True)
         self._application_root = (
             Path(application_root) if application_root is not None else None
         )
@@ -192,7 +191,13 @@ class GenerationWorker(QThread):
         )
 
     def _ui_language(self) -> str:
-        return require_supported_language_code(self._settings_snapshot.ui_language_code)
+        try:
+            return require_supported_language_code(
+                self._settings_snapshot.localization.target_language_code,
+                field_name="settings.localization.target_language_code",
+            )
+        except ValueError:
+            return "english"
 
     def cancel(self) -> None:
         self._cancelled.set()

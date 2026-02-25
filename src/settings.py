@@ -736,7 +736,7 @@ class ProgressMilestonesSettings(_StrictModel):
 
 class Settings(_StrictModel):
     schema_version: int = Field(
-        default=1,
+        default=2,
         ge=1,
         json_schema_extra=_ui_meta(
             tab="settings",

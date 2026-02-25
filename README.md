@@ -53,7 +53,7 @@ dtt-gui
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "paths": {
     "base_game_path": "/path/to/Stellaris",
     "mod_folder_path": "/path/to/Steam/steamapps/workshop/content/281990",
@@ -61,7 +61,7 @@ dtt-gui
     "local_mod_folder_path": ""
   },
   "localization": {
-    "language": "simp_chinese"
+    "target_language_code": "simp_chinese"
   },
   "display": {
     "max_children_per_node": 12,

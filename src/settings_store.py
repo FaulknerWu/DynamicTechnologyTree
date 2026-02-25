@@ -49,22 +49,12 @@ def load_settings(path: str | Path) -> Settings:
 
     payload = _parse_json_payload(raw_text)
     _require_schema_version(payload)
+    _require_supported_schema_version(payload)
 
     try:
         settings = Settings.model_validate(payload, strict=True)
     except ValidationError as exc:
         raise _build_validation_error(exc) from exc
-
-    if settings.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        raise SettingsStoreError(
-            (
-                "Unsupported settings schema_version "
-                f"{settings.schema_version}; expected one of "
-                f"{sorted(SUPPORTED_SCHEMA_VERSIONS)}"
-            ),
-            kind="unsupported_schema_version",
-            path=("schema_version",),
-        )
 
     return settings
 
@@ -141,6 +131,22 @@ def _require_schema_version(payload: Any) -> None:
             kind="schema_version_missing",
             path=("schema_version",),
         )
+
+
+def _require_supported_schema_version(payload: Any) -> None:
+    if not isinstance(payload, dict):
+        return
+    raw_version = payload.get("schema_version")
+    if isinstance(raw_version, int) and not isinstance(raw_version, bool):
+        if raw_version not in SUPPORTED_SCHEMA_VERSIONS:
+            raise SettingsStoreError(
+                (
+                    "不支持的 settings schema_version："
+                    f"{raw_version}；期望为 {sorted(SUPPORTED_SCHEMA_VERSIONS)} 之一"
+                ),
+                kind="unsupported_schema_version",
+                path=("schema_version",),
+            )
 
 
 def _build_validation_error(exc: ValidationError) -> SettingsStoreError:
