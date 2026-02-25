@@ -192,9 +192,7 @@ class GenerationWorker(QThread):
         )
 
     def _ui_language(self) -> str:
-        return require_supported_language_code(
-            self._settings_snapshot.localization.target_language_code
-        )
+        return require_supported_language_code(self._settings_snapshot.ui_language_code)
 
     def cancel(self) -> None:
         self._cancelled.set()

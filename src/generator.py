@@ -10,10 +10,7 @@ from dtt_core.ingestion_pipeline import IntegratedIngestionPipeline
 from dtt_core.output import OutputWriter
 from dtt_core.relations import RelationsBuilder
 from dtt_core.render import TreeRenderer
-from dtt_core.settings_snapshot import (
-    generator_config_from_settings,
-    require_settings_snapshot,
-)
+from dtt_core.settings_snapshot import RunSettingsSnapshot, require_settings_snapshot
 from dtt_core.stats import StatsReporter
 from dtt_core.stdout_event_sink import StdoutEventSink
 from dtt_core.tech_merge import MergedTechDefinition
@@ -29,7 +26,7 @@ class TechTreeGenerator:
     def __init__(
         self,
         *,
-        settings: Settings | None = None,
+        settings: Settings | RunSettingsSnapshot | None = None,
         application_root: Path | str | None = None,
     ):
         self._event_sink: EventSink = StdoutEventSink()
@@ -44,7 +41,7 @@ class TechTreeGenerator:
         )
 
         self._settings_snapshot = require_settings_snapshot(settings)
-        self.config = generator_config_from_settings(self._settings_snapshot)
+        self.config = self._settings_snapshot.generator_config
         self._ingestion_pipeline = IntegratedIngestionPipeline(
             config=self.config,
             localize=self._l,
@@ -183,12 +180,14 @@ class TechTreeGenerator:
     def _set_empire_profile(self, profile: EmpireProfile) -> None:
         self._output_writer.empire_profile = profile
 
-    def _require_settings_snapshot(self, settings: Settings | None) -> Settings:
+    def _require_settings_snapshot(
+        self, settings: Settings | RunSettingsSnapshot | None
+    ) -> RunSettingsSnapshot:
         return require_settings_snapshot(settings)
 
-    def _apply_settings_snapshot(self, settings: Settings) -> None:
+    def _apply_settings_snapshot(self, settings: RunSettingsSnapshot) -> None:
         self._settings_snapshot = require_settings_snapshot(settings)
-        self.config = generator_config_from_settings(self._settings_snapshot)
+        self.config = self._settings_snapshot.generator_config
         self._ingestion_pipeline.apply_config(self.config)
         self._relations_builder.display_config = self.config.display
         self._tree_renderer.display_config = self.config.display
@@ -261,7 +260,7 @@ class TechTreeGenerator:
         self,
         save_path: Path | str | None = None,
         *,
-        settings: Settings | None,
+        settings: Settings | RunSettingsSnapshot | None,
         country_id: int | None = None,
         event_sink: EventSink | None = None,
         cancel_event: Event | None = None,

@@ -9,9 +9,7 @@ _SOURCE_MANIFEST_MODULE = importlib.import_module("dtt_core.source_manifest")
 _SETTINGS_MODULE = importlib.import_module("settings")
 
 FileIndexer = _FILE_INDEXER_MODULE.FileIndexer
-generator_config_from_settings = (
-    _SETTINGS_SNAPSHOT_MODULE.generator_config_from_settings
-)
+require_settings_snapshot = _SETTINGS_SNAPSHOT_MODULE.require_settings_snapshot
 Source = _SOURCE_MANIFEST_MODULE.Source
 SourceManifest = _SOURCE_MANIFEST_MODULE.SourceManifest
 Settings = _SETTINGS_MODULE.Settings
@@ -51,7 +49,7 @@ def test_file_indexer_custom_pattern_recursive_technology_glob_includes_nested_f
     payload = Settings().model_dump(mode="python", round_trip=True)
     payload["file_indexing"]["technology_glob"] = "**/*.txt"
     settings = Settings.model_validate(payload, strict=True)
-    config = generator_config_from_settings(settings)
+    config = require_settings_snapshot(settings).generator_config
 
     custom_files = FileIndexer(config=config.file_indexing).index_technology_files(
         manifest

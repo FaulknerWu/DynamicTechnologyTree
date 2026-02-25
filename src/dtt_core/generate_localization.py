@@ -4,19 +4,34 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from collections.abc import Callable
+from typing import Any
 
+from config import (
+    DEFAULT_PROGRESS_CYCLES,
+    DEFAULT_PROGRESS_DONE,
+    DEFAULT_PROGRESS_INGEST_L10N,
+    DEFAULT_PROGRESS_LOAD_ORDER,
+    DEFAULT_PROGRESS_RELATIONS,
+    DEFAULT_PROGRESS_RENDER,
+    DEFAULT_PROGRESS_SAVE_PARSE_PARSE,
+    DEFAULT_PROGRESS_SAVE_PARSE_START,
+    DEFAULT_PROGRESS_WRITE_OUTPUT,
+)
 from dtt_core.events import EventEmitterMixin, EventKind, EventSink, StageId
 from dtt_core.output import OutputWriteResult
 from dtt_core.prepared_run import AmbiguousPlayerEmpireError, prepare_run
 from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
 from dtt_core.sav_reader import SaveReaderError, SaveReaderLimits
-from dtt_core.settings_snapshot import require_settings_snapshot
+from dtt_core.settings_snapshot import (
+    ProgressMilestones,
+    RunSettingsSnapshot,
+    require_settings_snapshot,
+)
 from dtt_core.typed_error import TypedCoreError
 from dtt_core.trigger_evaluator import EmpireProfile
-from settings import ProgressMilestonesSettings, Settings
 
 
-def _noop_apply_settings_snapshot(_settings: Settings) -> None:
+def _noop_apply_settings_snapshot(_settings: RunSettingsSnapshot) -> None:
     return
 
 
@@ -31,8 +46,12 @@ class GenerationSteps:
     report_circular_dependencies: Callable[[], None]
     display_generation_statistics: Callable[[], None]
     generate_all_yml_files: Callable[[], OutputWriteResult]
-    require_settings: Callable[[Settings | None], Settings] = require_settings_snapshot
-    apply_settings_snapshot: Callable[[Settings], None] = _noop_apply_settings_snapshot
+    require_settings: Callable[[object | None], RunSettingsSnapshot] = (
+        require_settings_snapshot
+    )
+    apply_settings_snapshot: Callable[[RunSettingsSnapshot], None] = (
+        _noop_apply_settings_snapshot
+    )
 
 
 @dataclass(frozen=True)
@@ -66,10 +85,21 @@ class GenerateLocalizationUseCase(EventEmitterMixin):
         country_id: int | None = None,
         cancel_event: Event | None = None,
     ) -> RunOutcome:
+        default_progress = ProgressMilestones(
+            save_parse_start=DEFAULT_PROGRESS_SAVE_PARSE_START,
+            save_parse_parse=DEFAULT_PROGRESS_SAVE_PARSE_PARSE,
+            load_order=DEFAULT_PROGRESS_LOAD_ORDER,
+            relations=DEFAULT_PROGRESS_RELATIONS,
+            ingest_l10n=DEFAULT_PROGRESS_INGEST_L10N,
+            render=DEFAULT_PROGRESS_RENDER,
+            cycles=DEFAULT_PROGRESS_CYCLES,
+            write_output=DEFAULT_PROGRESS_WRITE_OUTPUT,
+            done=DEFAULT_PROGRESS_DONE,
+        )
         return self._run(
             save_path,
             country_id=country_id,
-            progress_milestones=ProgressMilestonesSettings(),
+            progress_milestones=default_progress,
             save_reader_limits=None,
             cancel_event=cancel_event,
         )
@@ -77,7 +107,7 @@ class GenerateLocalizationUseCase(EventEmitterMixin):
     def run_with_settings(
         self,
         *,
-        settings: Settings | None,
+        settings: object | None,
         save_path: Path | str | None = None,
         country_id: int | None = None,
         cancel_event: Event | None = None,
@@ -85,16 +115,11 @@ class GenerateLocalizationUseCase(EventEmitterMixin):
         settings_snapshot = self._steps.require_settings(settings)
         self._steps.apply_settings_snapshot(settings_snapshot)
 
-        save_reader_limits = SaveReaderLimits(
-            max_member_uncompressed_size_bytes=settings_snapshot.save_reader.max_member_uncompressed_size_bytes,
-            max_total_uncompressed_size_bytes=settings_snapshot.save_reader.max_total_uncompressed_size_bytes,
-            max_parse_diagnostics_per_member=settings_snapshot.save_reader.max_parse_diagnostics_per_member,
-        )
         return self._run(
             save_path,
             country_id=country_id,
             progress_milestones=settings_snapshot.progress_milestones,
-            save_reader_limits=save_reader_limits,
+            save_reader_limits=settings_snapshot.save_reader_limits,
             cancel_event=cancel_event,
         )
 
@@ -103,7 +128,7 @@ class GenerateLocalizationUseCase(EventEmitterMixin):
         save_path: Path | str | None,
         *,
         country_id: int | None,
-        progress_milestones: ProgressMilestonesSettings,
+        progress_milestones: ProgressMilestones,
         save_reader_limits: SaveReaderLimits | None,
         cancel_event: Event | None,
     ) -> RunOutcome:

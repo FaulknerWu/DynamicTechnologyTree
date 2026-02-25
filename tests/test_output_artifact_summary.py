@@ -8,7 +8,7 @@ import pytest
 
 from dtt_core.events import EventKind, GenerationEvent
 from dtt_core.output import OutputWriter
-from dtt_core.settings_snapshot import generator_config_from_settings
+from dtt_core.settings_snapshot import require_settings_snapshot
 from models import Technology
 from settings import Settings
 
@@ -27,7 +27,7 @@ def _build_writer(
     settings: Settings,
     event_sink: RecordingEventSink,
 ) -> OutputWriter:
-    config = generator_config_from_settings(settings)
+    config = require_settings_snapshot(settings).generator_config
 
     tech_id = "tech_alpha"
     all_technologies = {
@@ -53,7 +53,7 @@ def test_output_writer_exposes_artifact_summary_and_emits_artifact_events(
     tmp_path: Path,
 ) -> None:
     settings = Settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
     settings.output.yml_targets = [""]
 
     sink = RecordingEventSink()
@@ -83,7 +83,7 @@ def test_output_writer_failure_emits_structured_warning_and_records_failed_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = Settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
     settings.output.yml_targets = [""]
     settings.output.on_write_error = "warn_and_continue"
 
@@ -120,7 +120,7 @@ def test_output_writer_skip_policy_records_skipped_paths_without_emitting_artifa
     tmp_path: Path,
 ) -> None:
     settings = Settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
     settings.output.yml_targets = [""]
     settings.output.on_existing_file = "skip"
 

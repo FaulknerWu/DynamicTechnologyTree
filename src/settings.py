@@ -30,6 +30,15 @@ from config import (
     DEFAULT_OUTPUT_REPORT_ENCODING,
     DEFAULT_OUTPUT_YML_ENCODING,
     DEFAULT_OVERLONG_TREE_ROOT_LOG_LIMIT,
+    DEFAULT_PROGRESS_CYCLES,
+    DEFAULT_PROGRESS_DONE,
+    DEFAULT_PROGRESS_INGEST_L10N,
+    DEFAULT_PROGRESS_LOAD_ORDER,
+    DEFAULT_PROGRESS_RELATIONS,
+    DEFAULT_PROGRESS_RENDER,
+    DEFAULT_PROGRESS_SAVE_PARSE_PARSE,
+    DEFAULT_PROGRESS_SAVE_PARSE_START,
+    DEFAULT_PROGRESS_WRITE_OUTPUT,
     DEFAULT_SAVE_READER_MAX_MEMBER_UNCOMPRESSED_SIZE_BYTES,
     DEFAULT_SAVE_READER_MAX_PARSE_DIAGNOSTICS_PER_MEMBER,
     DEFAULT_SAVE_READER_MAX_TOTAL_UNCOMPRESSED_SIZE_BYTES,
@@ -578,6 +587,7 @@ class OutputSettings(_StrictModel):
             normalized.append(str(item).strip())
         return normalized
 
+
 class ProgressMilestonesSettings(_StrictModel):
     _PREVIOUS_MILESTONE: ClassVar[dict[str, str]] = {
         "save_parse_parse": "save_parse_start",
@@ -590,7 +600,7 @@ class ProgressMilestonesSettings(_StrictModel):
     }
 
     save_parse_start: int = Field(
-        default=5,
+        default=DEFAULT_PROGRESS_SAVE_PARSE_START,
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -601,7 +611,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     save_parse_parse: int = Field(
-        default=10,
+        default=DEFAULT_PROGRESS_SAVE_PARSE_PARSE,
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -612,7 +622,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     load_order: int = Field(
-        default=20,
+        default=DEFAULT_PROGRESS_LOAD_ORDER,
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -623,7 +633,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     relations: int = Field(
-        default=35,
+        default=DEFAULT_PROGRESS_RELATIONS,
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -634,7 +644,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     ingest_l10n: int = Field(
-        default=45,
+        default=DEFAULT_PROGRESS_INGEST_L10N,
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -645,7 +655,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     render: int = Field(
-        default=50,
+        default=DEFAULT_PROGRESS_RENDER,
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -656,7 +666,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     cycles: int = Field(
-        default=60,
+        default=DEFAULT_PROGRESS_CYCLES,
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -667,7 +677,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     write_output: int = Field(
-        default=80,
+        default=DEFAULT_PROGRESS_WRITE_OUTPUT,
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -678,7 +688,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     done: int = Field(
-        default=100,
+        default=DEFAULT_PROGRESS_DONE,
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
