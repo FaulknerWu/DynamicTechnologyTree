@@ -10,11 +10,10 @@ from config import (
     GeneratorConfig,
     LocalizationConfig,
     PathConfig,
-    TechConfig,
 )
 from dtt_core.events import EventKind, GenerationEvent, StageId
 from dtt_core.output import OutputWriter, plan_output_file_paths
-from dtt_core.settings_snapshot import generator_config_from_settings
+from dtt_core.settings_snapshot import require_settings_snapshot
 from models import Technology
 from settings import Settings
 
@@ -36,7 +35,6 @@ def _build_config(lang_code: str = "english") -> GeneratorConfig:
             max_tree_depth=4,
             max_display_nodes=128,
         ),
-        tech=TechConfig(),
     )
 
 
@@ -269,14 +267,14 @@ def test_output_targets_customization_removing_target_stops_writing(
     monkeypatch.chdir(tmp_path)
 
     settings = Settings()
-    settings.localization.language = "english"
+    settings.localization.target_language_code = "english"
     settings.output.yml_targets = [
         "",
         "replace",
         "{lang_code}/replace",
         "zzz_tech_trees/replace",
     ]
-    config = generator_config_from_settings(settings)
+    config = require_settings_snapshot(settings).generator_config
 
     writer = _build_output_writer(config=config)
     writer.generate_all_yml_files()
