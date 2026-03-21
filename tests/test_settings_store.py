@@ -10,8 +10,7 @@ _settings = importlib.import_module("settings")
 _store = importlib.import_module("settings_store")
 
 Settings = _settings.Settings
-CURRENT_SCHEMA_VERSION = _store.CURRENT_SCHEMA_VERSION
-SUPPORTED_SCHEMA_VERSIONS = _store.SUPPORTED_SCHEMA_VERSIONS
+SETTINGS_SCHEMA_VERSION = _settings.SETTINGS_SCHEMA_VERSION
 SettingsStoreError = _store.SettingsStoreError
 load_settings = _store.load_settings
 save_settings = _store.save_settings
@@ -21,7 +20,7 @@ def test_settings_store_roundtrip(tmp_path: Path) -> None:
     settings_path = tmp_path / "settings.json"
     original = Settings.model_validate(
         {
-            "schema_version": CURRENT_SCHEMA_VERSION,
+            "schema_version": SETTINGS_SCHEMA_VERSION,
             "paths": {
                 "base_game_path": "/tmp/base",
                 "mod_folder_path": "/tmp/mods",
@@ -67,7 +66,7 @@ def test_settings_store_schema_invalid_reports_precise_path(tmp_path: Path) -> N
     settings_path.write_text(
         json.dumps(
             {
-                "schema_version": CURRENT_SCHEMA_VERSION,
+                "schema_version": SETTINGS_SCHEMA_VERSION,
                 "paths": {},
                 "localization": {},
                 "display": {"unknown_display": 1},
@@ -111,7 +110,7 @@ def test_settings_store_schema_version_missing_fails_loudly(tmp_path: Path) -> N
 
 def test_settings_store_unsupported_schema_version_fails_loudly(tmp_path: Path) -> None:
     settings_path = tmp_path / "settings.json"
-    unsupported_schema_version = max(SUPPORTED_SCHEMA_VERSIONS) + 1
+    unsupported_schema_version = SETTINGS_SCHEMA_VERSION + 1
     settings_path.write_text(
         json.dumps(
             {
@@ -137,7 +136,7 @@ def test_settings_store_rejects_type_coercion(tmp_path: Path) -> None:
     settings_path.write_text(
         json.dumps(
             {
-                "schema_version": CURRENT_SCHEMA_VERSION,
+                "schema_version": SETTINGS_SCHEMA_VERSION,
                 "paths": {},
                 "localization": {},
                 "display": {"max_tree_depth": "4"},

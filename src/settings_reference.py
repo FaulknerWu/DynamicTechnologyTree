@@ -68,15 +68,14 @@ def _format_default(value: Any) -> str:
 
 
 def generate_reference_markdown() -> str:
-    from localization import DEFAULT_LANGUAGE_CODE, LOCALIZATION_STRINGS
+    from gui.i18n import t
+    from localization import DEFAULT_LANGUAGE_CODE
     from settings import Settings, settings_json_schema
 
     schema = settings_json_schema()
     defaults_obj = Settings()
     defaults = defaults_obj.model_dump(mode="json")
-    strings = LOCALIZATION_STRINGS.get(DEFAULT_LANGUAGE_CODE) or LOCALIZATION_STRINGS.get(
-        "english", {}
-    )
+    lang = DEFAULT_LANGUAGE_CODE
 
     leaves = _iter_leaf_fields(schema, root=schema)
 
@@ -87,8 +86,8 @@ def generate_reference_markdown() -> str:
         tab = field_schema.get("tab", "settings")
         label_key = field_schema.get("label_key", "")
         help_key = field_schema.get("help_key", "")
-        label = str(strings.get(label_key, label_key))
-        help_text = str(strings.get(help_key, help_key))
+        label = t(label_key, lang) if label_key else str(label_key)
+        help_text = t(help_key, lang) if help_key else str(help_key)
         default_val = _get_nested(defaults, path)
         formatted_default = _format_default(default_val)
 
@@ -114,7 +113,7 @@ def generate_reference_markdown() -> str:
 
     sorted_tabs = sorted(by_tab.keys(), key=_tab_sort_key)
     for tab in sorted_tabs:
-        tab_title = strings.get(tab, tab)
+        tab_title = t(tab, lang)
         lines.append(f"## {tab_title}")
         lines.append("")
         lines.append("| 字段 | 标签 | 说明 | 默认值 |")
@@ -144,10 +143,6 @@ def leaf_field_paths() -> list[str]:
 def main() -> None:
     import pathlib
     import sys
-
-    from localization import initialize_metadata_defaults
-
-    initialize_metadata_defaults()
 
     md = generate_reference_markdown()
     out = (

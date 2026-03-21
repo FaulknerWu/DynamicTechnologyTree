@@ -221,7 +221,8 @@ def test_gui_settings_parity_raw_only_fields_are_editable_and_validated(
 
         assert panel.raw_editor.is_valid
         assert panel.apply_raw_editor_changes() is True
-        assert settings.display.max_tree_depth == 9
+        assert panel.settings is not settings
+        assert panel.settings.display.max_tree_depth == 9
     finally:
         panel.close()
         panel.deleteLater()

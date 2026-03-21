@@ -5,17 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 
-from config import (
-    DEFAULT_PROGRESS_CYCLES,
-    DEFAULT_PROGRESS_DONE,
-    DEFAULT_PROGRESS_INGEST_L10N,
-    DEFAULT_PROGRESS_LOAD_ORDER,
-    DEFAULT_PROGRESS_RELATIONS,
-    DEFAULT_PROGRESS_RENDER,
-    DEFAULT_PROGRESS_SAVE_PARSE_PARSE,
-    DEFAULT_PROGRESS_SAVE_PARSE_START,
-    DEFAULT_PROGRESS_WRITE_OUTPUT,
-)
+from config import DEFAULT_PROGRESS_MILESTONES
 from dtt_core.events import EventEmitterMixin, EventKind, EventSink, StageId
 from dtt_core.output import OutputWriteResult
 from dtt_core.prepared_run import AmbiguousPlayerEmpireError, prepare_run
@@ -84,17 +74,7 @@ class GenerateLocalizationUseCase(EventEmitterMixin):
         country_id: int | None = None,
         cancel_event: Event | None = None,
     ) -> RunOutcome:
-        default_progress = ProgressMilestones(
-            save_parse_start=DEFAULT_PROGRESS_SAVE_PARSE_START,
-            save_parse_parse=DEFAULT_PROGRESS_SAVE_PARSE_PARSE,
-            load_order=DEFAULT_PROGRESS_LOAD_ORDER,
-            relations=DEFAULT_PROGRESS_RELATIONS,
-            ingest_l10n=DEFAULT_PROGRESS_INGEST_L10N,
-            render=DEFAULT_PROGRESS_RENDER,
-            cycles=DEFAULT_PROGRESS_CYCLES,
-            write_output=DEFAULT_PROGRESS_WRITE_OUTPUT,
-            done=DEFAULT_PROGRESS_DONE,
-        )
+        default_progress = ProgressMilestones(**DEFAULT_PROGRESS_MILESTONES)
         return self._run(
             save_path,
             country_id=country_id,

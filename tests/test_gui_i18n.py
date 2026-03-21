@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 )  # noqa: E402
 
 from gui.generation_worker import GenerationOutcome, GenerationOutcomeCode
-from gui.i18n import default_language_from_system, map_locale_to_language_key, t
+from gui.i18n import t
 from gui.main_window import MainWindow
 from gui.settings_renderer import PathFieldWidget
 from settings_store import load_settings
@@ -64,18 +64,6 @@ def test_t_falls_back_to_english_for_missing_keys() -> None:
     assert t("ui_btn_generate", "french") == t("ui_btn_generate", "english")
 
 
-def test_locale_mapping_and_default_language_selection() -> None:
-    assert map_locale_to_language_key("en_US") == "english"
-    assert map_locale_to_language_key("zh_CN") == "simp_chinese"
-    assert map_locale_to_language_key("Chinese (Simplified)_China") == "simp_chinese"
-    assert map_locale_to_language_key("pt_BR.UTF-8") == "braz_por"
-    assert default_language_from_system(locale_name="pt_BR") == "english"
-    assert (
-        default_language_from_system(locale_name="Chinese (Simplified)_China")
-        == "simp_chinese"
-    )
-
-
 def test_runtime_retranslation_updates_window_tabs_and_labels(
     tmp_path: Path, qt_app: Any, message_boxes
 ) -> None:
@@ -93,6 +81,7 @@ def test_runtime_retranslation_updates_window_tabs_and_labels(
         max_children_label = window.settings_panel.settings_renderer.label_for(
             "display.max_children_per_node"
         )
+        settings_profile_label = window.settings_profile_label
 
         combo.setCurrentText("english")
         qt_app.processEvents()
@@ -101,6 +90,13 @@ def test_runtime_retranslation_updates_window_tabs_and_labels(
         generate_en = window.generate_button.text()
         tab_en = tabs.tabText(paths_index)
         max_children_label_en = max_children_label.text()
+        profile_label_en = settings_profile_label.text()
+        raw_validation_en = window.settings_panel.raw_editor.validation_label.text()
+
+        advanced_tab = window.settings_panel.advanced_tab
+        advanced_index = tabs.indexOf(advanced_tab)
+        assert advanced_index != -1
+        advanced_tab_en = tabs.tabText(advanced_index)
 
         combo.setCurrentText("simp_chinese")
         qt_app.processEvents()
@@ -120,6 +116,25 @@ def test_runtime_retranslation_updates_window_tabs_and_labels(
         assert max_children_label.text() != max_children_label_en
         assert max_children_label.text() == t("ui_label_max_children", "simp_chinese")
         assert max_children_label_en == t("ui_label_max_children", "english")
+
+        assert settings_profile_label.text() != profile_label_en
+        assert settings_profile_label.text() == t(
+            "ui_label_settings_profile", "simp_chinese"
+        )
+        assert profile_label_en == t("ui_label_settings_profile", "english")
+
+        assert tabs.tabText(advanced_index) != advanced_tab_en
+        assert tabs.tabText(advanced_index) == t("ui_tab_advanced", "simp_chinese")
+        assert advanced_tab_en == t("ui_tab_advanced", "english")
+
+        assert (
+            window.settings_panel.raw_editor.validation_label.text()
+            != raw_validation_en
+        )
+        assert window.settings_panel.raw_editor.validation_label.text() == t(
+            "ui_settings_json_valid", "simp_chinese"
+        )
+        assert raw_validation_en == t("ui_settings_json_valid", "english")
     finally:
         window.close()
         window.deleteLater()

@@ -16,8 +16,8 @@ from gui.generation_worker import (
     GenerationWorker,
 )
 from gui.i18n import t
-from settings import Settings
-from settings_store import CURRENT_SCHEMA_VERSION, SettingsStoreError, load_settings
+from settings import SETTINGS_SCHEMA_VERSION, Settings
+from settings_store import SettingsStoreError, load_settings
 
 
 def _capture_finished_outcome(worker: GenerationWorker) -> GenerationOutcome:
@@ -32,21 +32,12 @@ def _capture_finished_outcome(worker: GenerationWorker) -> GenerationOutcome:
 def test_language_single_source_settings_drive_ui_and_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import gui.generation_worker as generation_worker_module
-
-    def _unexpected_system_fallback() -> str:
-        raise AssertionError("system locale fallback should not be consulted")
-
-    monkeypatch.setattr(
-        generation_worker_module,
-        "default_language_from_system",
-        _unexpected_system_fallback,
-        raising=False,
-    )
     monkeypatch.setattr(
         GenerationWorker,
         "_run_generator",
-        lambda _self, *, save_path, country_id: RunOutcome(code=RunOutcomeCode.INCOMPLETE),
+        lambda _self, *, save_path, country_id: RunOutcome(
+            code=RunOutcomeCode.INCOMPLETE
+        ),
     )
 
     settings = Settings()
@@ -86,7 +77,7 @@ def test_language_invalid_rejected_for_runtime_settings_and_json_load(
     settings_path.write_text(
         json.dumps(
             {
-                "schema_version": CURRENT_SCHEMA_VERSION,
+                "schema_version": SETTINGS_SCHEMA_VERSION,
                 "paths": {},
                 "localization": {"target_language_code": "not_a_supported_language"},
                 "display": {},

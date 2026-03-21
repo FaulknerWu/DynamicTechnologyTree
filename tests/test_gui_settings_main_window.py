@@ -13,6 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QSpinBox
 
 import gui as gui_module
+from gui.i18n import t
 from gui.main_window import MainWindow
 from gui.settings_panel import SettingsPanel
 from gui.settings_renderer import PathFieldWidget
@@ -165,14 +166,17 @@ def test_gui_settings_main_window_invalid_raw_json_disables_generate_and_warns(
         assert not window.generate_button.isEnabled()
         assert window.settings_error_label.isVisible()
         error_text = window.settings_error_label.text().lower()
-        assert "line" in error_text
-        assert "fix" in error_text
+        assert "json" in error_text
+        assert t("ui_hint_fix_settings", "simp_chinese").lower() in error_text
 
         window.on_generate_clicked()
 
         assert message_boxes["warning"]
         warning_args = message_boxes["warning"][-1][0]
-        assert "fix" in str(warning_args[2]).lower()
+        assert (
+            t("ui_hint_fix_settings", "simp_chinese").lower()
+            in str(warning_args[2]).lower()
+        )
     finally:
         window.close()
         window.deleteLater()
@@ -262,8 +266,15 @@ def test_gui_settings_main_window_ini_not_supported_on_startup(
         assert not window.generate_button.isEnabled()
         assert window.settings_error_label.isVisible()
         error_text = window.settings_error_label.text().lower()
-        assert "ini settings profiles are no longer supported" in error_text
-        assert "json settings profile" in error_text
+        assert (
+            t(
+                "ui_error_ini_not_supported",
+                "simp_chinese",
+                path=str(legacy_profile),
+            ).lower()
+            in error_text
+        )
+        assert t("ui_hint_fix_settings", "simp_chinese").lower() in error_text
     finally:
         window.close()
         window.deleteLater()
@@ -294,7 +305,16 @@ def test_gui_settings_main_window_ini_not_supported_on_profile_switch(
         assert window.settings_path == profile_path
         assert message_boxes["warning"]
         warning_args = message_boxes["warning"][-1][0]
-        assert "json settings profile" in str(warning_args[2]).lower()
+        warning_text = str(warning_args[2]).lower()
+        assert (
+            t(
+                "ui_error_ini_not_supported",
+                "simp_chinese",
+                path=str(legacy_profile),
+            ).lower()
+            in warning_text
+        )
+        assert t("ui_hint_fix_settings", "simp_chinese").lower() in warning_text
     finally:
         window.close()
         window.deleteLater()
@@ -312,8 +332,8 @@ def test_gui_settings_main_window_invalid_blocks_missing_required_paths_block_ge
     try:
         assert not window.generate_button.isEnabled()
         assert window.settings_error_label.isVisible()
-        assert (
-            "fix the highlighted fields" in window.settings_error_label.text().lower()
+        assert t("ui_hint_fix_settings", "simp_chinese").lower() in (
+            window.settings_error_label.text().lower()
         )
     finally:
         window.close()

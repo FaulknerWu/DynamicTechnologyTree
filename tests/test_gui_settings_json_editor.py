@@ -28,7 +28,7 @@ def test_gui_settings_json_editor_invalid_json_marks_invalid_and_blocks_apply(
     assert not editor.is_valid
     assert "line 1" in editor.validation_error.lower()
     assert "column 2" in editor.validation_error.lower()
-    assert not editor.apply_to_bound_settings()
+    assert editor.snapshot_validated_settings() is None
     assert settings.paths.base_game_path == "/before"
 
     editor.close()
@@ -59,7 +59,7 @@ def test_gui_settings_json_editor_schema_invalid_reports_precise_path(
     qt_app.processEvents()
 
 
-def test_gui_settings_json_editor_apply_valid_json_updates_bound_settings(
+def test_gui_settings_json_editor_apply_valid_json_returns_isolated_snapshot(
     qt_app: Any,
 ) -> None:
     settings = Settings()
@@ -75,17 +75,21 @@ def test_gui_settings_json_editor_apply_valid_json_updates_bound_settings(
     editor.text_edit.setPlainText(json.dumps(payload, indent=2))
     qt_app.processEvents()
 
-    assert editor.apply_to_bound_settings()
+    validated_settings = editor.snapshot_validated_settings()
+    assert validated_settings is not None
     assert editor.is_valid
-    assert settings.display.max_tree_depth == 7
-    assert settings.ingestion.diagnostic_example_limit == 22
-    assert settings.output.on_existing_file == "skip"
+    assert settings.display.max_tree_depth != 7
+    assert settings.ingestion.diagnostic_example_limit != 22
+    assert settings.output.on_existing_file != "skip"
+    assert validated_settings.display.max_tree_depth == 7
+    assert validated_settings.ingestion.diagnostic_example_limit == 22
+    assert validated_settings.output.on_existing_file == "skip"
 
     assert editor._validated_settings is not None
     editor._validated_settings.ingestion.diagnostic_example_limit = 99
     editor._validated_settings.output.on_existing_file = "fail"
-    assert settings.ingestion.diagnostic_example_limit == 22
-    assert settings.output.on_existing_file == "skip"
+    assert validated_settings.ingestion.diagnostic_example_limit == 22
+    assert validated_settings.output.on_existing_file == "skip"
 
     editor.close()
     editor.deleteLater()

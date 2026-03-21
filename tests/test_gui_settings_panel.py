@@ -8,7 +8,7 @@ from typing import Any, cast
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QSpinBox, QTabWidget, QWidget
+from PyQt6.QtWidgets import QGroupBox, QSpinBox, QTabWidget, QWidget
 
 from gui.settings_json_editor import SettingsJsonEditor
 from gui.settings_panel import SettingsPanel
@@ -20,7 +20,10 @@ _TRANSLATIONS = {
     "ui_tab_localization": "Localization",
     "ui_tab_display": "Display",
     "ui_tab_advanced": "Advanced",
+    "ui_label_paths": "Path Group",
+    "ui_label_display": "Display Group",
 }
+
 
 def _translate(key: str) -> str:
     return _TRANSLATIONS.get(key, key)
@@ -72,6 +75,9 @@ def test_gui_settings_panel_renders_schema_tabs_and_advanced_tab(qt_app: Any) ->
 
         assert isinstance(panel.raw_editor, SettingsJsonEditor)
         assert _is_descendant(panel.raw_editor, advanced_tab)
+        group_titles = {group.title() for group in panel.findChildren(QGroupBox)}
+        assert "Path Group" in group_titles
+        assert "Display Group" in group_titles
     finally:
         panel.close()
         panel.deleteLater()
@@ -102,9 +108,10 @@ def test_gui_settings_panel_raw_sync_apply_updates_settings_and_controls(
         assert panel.apply_raw_editor_changes() is True
         qt_app.processEvents()
 
-        assert settings.display.max_tree_depth == 9
+        assert panel.settings is not settings
+        assert panel.settings.display.max_tree_depth == 9
         assert depth_spin.value() == 9
-        assert settings.paths.base_game_path == "/tmp/panel-sync"
+        assert panel.settings.paths.base_game_path == "/tmp/panel-sync"
         assert base_game_path_widget.text() == "/tmp/panel-sync"
     finally:
         panel.close()

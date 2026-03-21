@@ -16,13 +16,13 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from gui.i18n import t
 from settings import Settings
 from settings_schema_ref import resolve_schema_ref
 
@@ -89,14 +89,8 @@ class _TabSection:
 
 class PathFieldWidget(QWidget):
     text_changed = pyqtSignal(str)
-    browse_clicked = pyqtSignal()
 
-    def __init__(
-        self,
-        parent: QWidget | None = None,
-        *,
-        browse_button_text: str = "Browse",
-    ) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
         layout = QHBoxLayout(self)
@@ -104,14 +98,8 @@ class PathFieldWidget(QWidget):
         layout.setSpacing(6)
 
         self.line_edit = QLineEdit(self)
-        self.browse_button = QPushButton(browse_button_text, self)
-        self.browse_button.setEnabled(False)
-
         layout.addWidget(self.line_edit)
-        layout.addWidget(self.browse_button)
-
         self.line_edit.textChanged.connect(self.text_changed.emit)
-        self.browse_button.clicked.connect(self.browse_clicked.emit)
 
     def text(self) -> str:
         return self.line_edit.text()
@@ -132,7 +120,7 @@ class SettingsRenderer:
     ) -> None:
         self.schema = schema
         self.settings = settings
-        self._translate = translate or (lambda key: key)
+        self._translate = translate or (lambda key: t(key, "english"))
         self._on_validation_changed = on_validation_changed
         self.validation_runs = 0
         self.validation_errors: dict[str, str] = {}
@@ -170,6 +158,10 @@ class SettingsRenderer:
 
     def error_for(self, field_path: str) -> str | None:
         return self.validation_errors.get(field_path)
+
+    def set_settings(self, settings: Settings) -> None:
+        self.settings = settings
+        self.refresh_from_settings()
 
     def refresh_from_settings(self) -> None:
         self._syncing = True
@@ -609,9 +601,19 @@ def _meta_str(schema: dict[str, Any], key: str, *, default: str = "") -> str:
 
 
 def _human_label(key: str, translate: Translator) -> str:
-    translated = translate(key)
-    if translated != key:
-        return translated
+    candidates = (
+        (key,)
+        if key.startswith("ui_")
+        else (
+            f"ui_label_{key}",
+            f"ui_tab_{key}",
+            key,
+        )
+    )
+    for candidate in candidates:
+        translated = translate(candidate)
+        if translated != candidate:
+            return translated
     return key.replace("_", " ").title()
 
 

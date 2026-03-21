@@ -8,10 +8,7 @@ from typing import Any
 
 from pydantic import ValidationError  # pyright: ignore[reportMissingImports]
 
-from settings import Settings
-
-CURRENT_SCHEMA_VERSION = Settings().schema_version
-SUPPORTED_SCHEMA_VERSIONS = frozenset({CURRENT_SCHEMA_VERSION})
+from settings import SETTINGS_SCHEMA_VERSION, Settings
 
 ErrorPath = tuple[str | int, ...]
 
@@ -48,15 +45,17 @@ def load_settings(path: str | Path) -> Settings:
         ) from exc
 
     payload = _parse_json_payload(raw_text)
+    return validate_settings_payload(payload)
+
+
+def validate_settings_payload(payload: Any) -> Settings:
     _require_schema_version(payload)
     _require_supported_schema_version(payload)
 
     try:
-        settings = Settings.model_validate(payload, strict=True)
+        return Settings.model_validate(payload, strict=True)
     except ValidationError as exc:
         raise _build_validation_error(exc) from exc
-
-    return settings
 
 
 def save_settings(path: str | Path, settings: Settings) -> None:
@@ -138,11 +137,11 @@ def _require_supported_schema_version(payload: Any) -> None:
         return
     raw_version = payload.get("schema_version")
     if isinstance(raw_version, int) and not isinstance(raw_version, bool):
-        if raw_version not in SUPPORTED_SCHEMA_VERSIONS:
+        if raw_version != SETTINGS_SCHEMA_VERSION:
             raise SettingsStoreError(
                 (
                     "不支持的 settings schema_version："
-                    f"{raw_version}；期望为 {sorted(SUPPORTED_SCHEMA_VERSIONS)} 之一"
+                    f"{raw_version}；期望为 {SETTINGS_SCHEMA_VERSION}"
                 ),
                 kind="unsupported_schema_version",
                 path=("schema_version",),
@@ -190,9 +189,8 @@ def _normalize_pydantic_errors(exc: ValidationError) -> list[dict[str, Any]]:
 
 
 __all__ = [
-    "CURRENT_SCHEMA_VERSION",
-    "SUPPORTED_SCHEMA_VERSIONS",
     "SettingsStoreError",
     "load_settings",
     "save_settings",
+    "validate_settings_payload",
 ]

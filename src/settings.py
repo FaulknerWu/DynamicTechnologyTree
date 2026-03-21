@@ -11,6 +11,7 @@ from pydantic import (  # pyright: ignore[reportMissingImports]
 )
 
 from config import (
+    DEFAULT_DECODE_FAILURE_POLICY,
     DEFAULT_DECODE_FALLBACK_ENCODINGS,
     DEFAULT_DECODE_PREFERRED_ENCODINGS,
     DEFAULT_DECODE_REPLACEMENT_ENCODING,
@@ -30,21 +31,14 @@ from config import (
     DEFAULT_OUTPUT_REPORT_ENCODING,
     DEFAULT_OUTPUT_YML_ENCODING,
     DEFAULT_OVERLONG_TREE_ROOT_LOG_LIMIT,
-    DEFAULT_PROGRESS_CYCLES,
-    DEFAULT_PROGRESS_DONE,
-    DEFAULT_PROGRESS_INGEST_L10N,
-    DEFAULT_PROGRESS_LOAD_ORDER,
-    DEFAULT_PROGRESS_RELATIONS,
-    DEFAULT_PROGRESS_RENDER,
-    DEFAULT_PROGRESS_SAVE_PARSE_PARSE,
-    DEFAULT_PROGRESS_SAVE_PARSE_START,
-    DEFAULT_PROGRESS_WRITE_OUTPUT,
+    DEFAULT_PROGRESS_MILESTONES,
     DEFAULT_SAVE_READER_MAX_MEMBER_UNCOMPRESSED_SIZE_BYTES,
     DEFAULT_SAVE_READER_MAX_PARSE_DIAGNOSTICS_PER_MEMBER,
     DEFAULT_SAVE_READER_MAX_TOTAL_UNCOMPRESSED_SIZE_BYTES,
     DEFAULT_TECHNOLOGY_GLOB,
     DEFAULT_TECHNOLOGY_ROOT,
     DEFAULT_YML_OUTPUT_TARGETS,
+    PROGRESS_MILESTONE_FIELD_ORDER,
     DecodeFailurePolicy,
     ExistingFilePolicy,
     MultiActivePlaysetSelectionPolicy,
@@ -55,6 +49,8 @@ from localization import (
     SUPPORTED_LANGUAGE_CODES,
     require_supported_language_code,
 )
+
+SETTINGS_SCHEMA_VERSION = 2
 
 
 def _ui_meta(*, tab: str, group: str, label_key: str, help_key: str) -> dict[str, Any]:
@@ -399,7 +395,7 @@ class DecodeSettings(_StrictModel):
         ),
     )
     on_failure: DecodeFailurePolicy = Field(
-        default="replace",
+        default=DEFAULT_DECODE_FAILURE_POLICY,
         json_schema_extra=_ui_meta(
             tab="ui_tab_output",
             group="decode",
@@ -425,6 +421,7 @@ class DecodeSettings(_StrictModel):
         if not encoding:
             raise ValueError("replacement_encoding must be non-empty")
         return encoding
+
 
 _MAX_INT32 = (2**31) - 1
 
@@ -505,6 +502,7 @@ class DiagnosticsSettings(_StrictModel):
             help_key="ui_help_diagnostics_overlong_tree_roots_log_limit",
         ),
     )
+
 
 class OutputSettings(_StrictModel):
     yml_targets: list[str] = Field(
@@ -588,19 +586,28 @@ class OutputSettings(_StrictModel):
         return normalized
 
 
+_PROGRESS_MILESTONE_MONOTONIC_FIELDS: tuple[str, ...] = PROGRESS_MILESTONE_FIELD_ORDER[
+    1:-1
+]
+
+
+def _build_previous_milestone_map(order: tuple[str, ...]) -> dict[str, str]:
+    previous: dict[str, str] = {}
+    for index in range(1, len(order)):
+        current = order[index]
+        prev = order[index - 1]
+        previous[current] = prev
+    previous.pop("done", None)
+    return previous
+
+
 class ProgressMilestonesSettings(_StrictModel):
-    _PREVIOUS_MILESTONE: ClassVar[dict[str, str]] = {
-        "save_parse_parse": "save_parse_start",
-        "load_order": "save_parse_parse",
-        "relations": "load_order",
-        "ingest_l10n": "relations",
-        "render": "ingest_l10n",
-        "cycles": "render",
-        "write_output": "cycles",
-    }
+    _PREVIOUS_MILESTONE: ClassVar[dict[str, str]] = _build_previous_milestone_map(
+        PROGRESS_MILESTONE_FIELD_ORDER
+    )
 
     save_parse_start: int = Field(
-        default=DEFAULT_PROGRESS_SAVE_PARSE_START,
+        default=DEFAULT_PROGRESS_MILESTONES["save_parse_start"],
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -611,7 +618,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     save_parse_parse: int = Field(
-        default=DEFAULT_PROGRESS_SAVE_PARSE_PARSE,
+        default=DEFAULT_PROGRESS_MILESTONES["save_parse_parse"],
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -622,7 +629,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     load_order: int = Field(
-        default=DEFAULT_PROGRESS_LOAD_ORDER,
+        default=DEFAULT_PROGRESS_MILESTONES["load_order"],
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -633,7 +640,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     relations: int = Field(
-        default=DEFAULT_PROGRESS_RELATIONS,
+        default=DEFAULT_PROGRESS_MILESTONES["relations"],
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -644,7 +651,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     ingest_l10n: int = Field(
-        default=DEFAULT_PROGRESS_INGEST_L10N,
+        default=DEFAULT_PROGRESS_MILESTONES["ingest_l10n"],
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -655,7 +662,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     render: int = Field(
-        default=DEFAULT_PROGRESS_RENDER,
+        default=DEFAULT_PROGRESS_MILESTONES["render"],
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -666,7 +673,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     cycles: int = Field(
-        default=DEFAULT_PROGRESS_CYCLES,
+        default=DEFAULT_PROGRESS_MILESTONES["cycles"],
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -677,7 +684,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     write_output: int = Field(
-        default=DEFAULT_PROGRESS_WRITE_OUTPUT,
+        default=DEFAULT_PROGRESS_MILESTONES["write_output"],
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -688,7 +695,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
     done: int = Field(
-        default=DEFAULT_PROGRESS_DONE,
+        default=DEFAULT_PROGRESS_MILESTONES["done"],
         ge=0,
         le=100,
         json_schema_extra=_ui_meta(
@@ -699,15 +706,7 @@ class ProgressMilestonesSettings(_StrictModel):
         ),
     )
 
-    @field_validator(
-        "save_parse_parse",
-        "load_order",
-        "relations",
-        "ingest_l10n",
-        "render",
-        "cycles",
-        "write_output",
-    )
+    @field_validator(*_PROGRESS_MILESTONE_MONOTONIC_FIELDS)
     @classmethod
     def _validate_monotonic_non_decreasing(
         cls,
@@ -736,7 +735,7 @@ class ProgressMilestonesSettings(_StrictModel):
 
 class Settings(_StrictModel):
     schema_version: int = Field(
-        default=2,
+        default=SETTINGS_SCHEMA_VERSION,
         ge=1,
         json_schema_extra=_ui_meta(
             tab="settings",
@@ -862,6 +861,7 @@ __all__ = [
     "ProgressMilestonesSettings",
     "OutputSettings",
     "SaveReaderSettings",
+    "SETTINGS_SCHEMA_VERSION",
     "Settings",
     "settings_json_schema",
 ]

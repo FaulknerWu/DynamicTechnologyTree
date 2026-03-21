@@ -90,8 +90,9 @@ def test_settings_reference_leaf_field_paths_matches_schema() -> None:
 
 def test_settings_reference_has_all_tabs() -> None:
     localization_module = importlib.import_module("localization")
+    gui_i18n_module = importlib.import_module("gui.i18n")
+    t = gui_i18n_module.t
     language_code = localization_module.DEFAULT_LANGUAGE_CODE
-    strings = localization_module.LOCALIZATION_STRINGS.get(language_code, {})
     schema = settings_json_schema()
 
     tabs: set[str] = set()
@@ -105,7 +106,7 @@ def test_settings_reference_has_all_tabs() -> None:
     # 参考文档会将“当前默认语言”的 tab 标题作为二级标题渲染出来
     missing_tabs = []
     for tab in tabs:
-        title = strings.get(tab, tab)
+        title = t(tab, language_code)
         if f"## {title}" not in md:
             missing_tabs.append(f"{tab} (expected heading '## {title}')")
     assert not missing_tabs, "Tabs missing from reference:\n" + "\n".join(

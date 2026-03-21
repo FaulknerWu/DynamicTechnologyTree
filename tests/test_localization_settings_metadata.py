@@ -10,7 +10,32 @@ settings_json_schema = settings_module.settings_json_schema
 localization_module = importlib.import_module("localization")
 LOCALIZATION_STRINGS = localization_module.LOCALIZATION_STRINGS
 
+gui_i18n_module = importlib.import_module("gui.i18n")
+t = gui_i18n_module.t
+
 _LOCALIZATION_KEY_PATTERN = re.compile(r"^[a-z0-9_]+$")
+_RUNTIME_UI_KEYS = {
+    "ui_label_settings_profile",
+    "ui_btn_open_profile",
+    "ui_btn_save_profile_as",
+    "ui_hint_fix_settings",
+    "ui_error_ini_not_supported",
+    "ui_dialog_title_choose_settings_file",
+    "ui_dialog_title_save_settings_file",
+    "ui_tab_advanced",
+    "ui_action_apply_json",
+    "ui_settings_json_valid",
+    "ui_settings_json_invalid_json",
+    "ui_settings_json_schema_mismatch",
+    "ui_settings_json_schema_validation_failed",
+    "ui_label_paths",
+    "ui_label_autodetect",
+    "ui_label_localization",
+    "ui_label_display",
+    "ui_label_output",
+    "ui_label_eligibility",
+    "ui_label_schema",
+}
 
 
 def _resolve_ref(node: dict[str, Any], root_schema: dict[str, Any]) -> dict[str, Any]:
@@ -73,6 +98,11 @@ def test_localization_settings_metadata() -> None:
 
     assert leaf_fields, "Expected at least one leaf settings field in schema"
 
+    english_strings = LOCALIZATION_STRINGS.get("english")
+    assert isinstance(
+        english_strings, dict
+    ), "Expected localization strings for english"
+
     errors: list[str] = []
     for field_path, field_schema in leaf_fields:
         field_key = _field_key(field_path)
@@ -90,10 +120,17 @@ def test_localization_settings_metadata() -> None:
                 )
                 continue
 
-            for language, strings in LOCALIZATION_STRINGS.items():
-                if localization_key not in strings:
+            if localization_key not in english_strings:
+                errors.append(
+                    f"{field_key}: {metadata_key} '{localization_key}' is missing for english"
+                )
+                continue
+
+            for language in LOCALIZATION_STRINGS:
+                translated = t(localization_key, language)
+                if translated == localization_key:
                     errors.append(
-                        f"{field_key}: {metadata_key} '{localization_key}' is missing for {language}"
+                        f"{field_key}: {metadata_key} '{localization_key}' is not translatable for {language}"
                     )
 
     assert not errors, "\n".join(errors)
@@ -116,3 +153,23 @@ def test_localization_no_ini_keys() -> None:
                 violations.append(f"{language}: {key}")
 
     assert not violations, "\n".join(violations)
+
+
+def test_runtime_ui_localization_keys_are_translatable() -> None:
+    english_strings = LOCALIZATION_STRINGS.get("english")
+    assert isinstance(
+        english_strings, dict
+    ), "Expected localization strings for english"
+
+    errors: list[str] = []
+    for localization_key in sorted(_RUNTIME_UI_KEYS):
+        if localization_key not in english_strings:
+            errors.append(f"{localization_key} is missing for english")
+            continue
+
+        for language in LOCALIZATION_STRINGS:
+            translated = t(localization_key, language)
+            if translated == localization_key:
+                errors.append(f"{localization_key} is not translatable for {language}")
+
+    assert not errors, "\n".join(errors)

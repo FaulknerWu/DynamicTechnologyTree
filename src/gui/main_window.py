@@ -48,9 +48,11 @@ class MainWindow(QMainWindow):
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setMinimumSize(700, 500)
 
-        self.settings_path = Path(settings_path) if settings_path else _default_settings_path()
+        self.settings_path = (
+            Path(settings_path) if settings_path else _default_settings_path()
+        )
         self.application_path = Path(application_path) if application_path else None
-        self.settings = Settings()
+        self._settings = Settings()
         self.setWindowTitle(t("ui_app_title", self._current_lang()))
 
         self.worker: GenerationWorker | None = None
@@ -66,6 +68,18 @@ class MainWindow(QMainWindow):
         self._check_and_auto_detect()
         self._refresh_validation_state()
 
+    @property
+    def settings(self) -> Settings:
+        if hasattr(self, "settings_panel"):
+            return self.settings_panel.settings
+        return self._settings
+
+    @settings.setter
+    def settings(self, settings: Settings) -> None:
+        self._settings = settings
+        if hasattr(self, "settings_panel"):
+            self.settings_panel.set_settings(settings)
+
     def _current_lang(self) -> str:
         try:
             return require_supported_language_code(
@@ -76,12 +90,6 @@ class MainWindow(QMainWindow):
 
     def _t(self, key: str, **kwargs: object) -> str:
         return t(key, self._current_lang(), **kwargs)
-
-    def _t_or_default(self, key: str, fallback: str) -> str:
-        translated = self._t(key)
-        if translated and translated != key:
-            return translated
-        return fallback
 
     def _build_ui(self) -> None:
         central_widget = QWidget(self)
@@ -133,7 +141,7 @@ class MainWindow(QMainWindow):
 
         self.settings_panel = SettingsPanel(
             settings_json_schema(),
-            self.settings,
+            self._settings,
             parent=content_widget,
             translate=lambda key: self._t(key),
         )
@@ -186,15 +194,9 @@ class MainWindow(QMainWindow):
             self.generate_button.setText(self._t("ui_btn_generate"))
 
         self.save_button.setText(self._t("ui_btn_save_config"))
-        self.settings_profile_label.setText(
-            self._t_or_default("ui_label_settings_profile", "Settings Profile:")
-        )
-        self.open_profile_button.setText(
-            self._t_or_default("ui_btn_open_profile", "Open Profile...")
-        )
-        self.save_as_profile_button.setText(
-            self._t_or_default("ui_btn_save_profile_as", "Save Profile As...")
-        )
+        self.settings_profile_label.setText(self._t("ui_label_settings_profile"))
+        self.open_profile_button.setText(self._t("ui_btn_open_profile"))
+        self.save_as_profile_button.setText(self._t("ui_btn_save_profile_as"))
         self.settings_panel.retranslate(lambda key: self._t(key))
 
         self._update_detection_status()
@@ -245,15 +247,12 @@ class MainWindow(QMainWindow):
             self._refresh_validation_state()
             return
 
-        self._load_settings_into_ssot(loaded_settings)
+        self.settings = loaded_settings
         self._settings_file_error = ""
-        self.settings_panel.refresh_from_settings()
         self.append_log(self._t("ui_log_loaded_config", path=str(self.settings_path)))
         self._refresh_validation_state()
 
-    def switch_settings_profile(
-        self, settings_path: str | os.PathLike[str]
-    ) -> bool:
+    def switch_settings_profile(self, settings_path: str | os.PathLike[str]) -> bool:
         target_path = Path(settings_path)
         previous_path = self.settings_path
 
@@ -289,7 +288,7 @@ class MainWindow(QMainWindow):
                 )
                 return False
 
-            self._load_settings_into_ssot(loaded_settings)
+            self.settings = loaded_settings
             self._settings_file_error = ""
             self.append_log(self._t("ui_log_loaded_config", path=str(target_path)))
         else:
@@ -299,15 +298,9 @@ class MainWindow(QMainWindow):
         self.settings_path = target_path
         self._register_profile_path(target_path)
         self._set_current_profile_path(target_path)
-        self.settings_panel.refresh_from_settings()
         self.retranslate_ui()
         self._refresh_validation_state()
         return True
-
-    def _load_settings_into_ssot(self, incoming: Settings) -> None:
-        incoming_snapshot = incoming.model_copy(deep=True)
-        for field_name in Settings.model_fields:
-            setattr(self.settings, field_name, getattr(incoming_snapshot, field_name))
 
     def _format_settings_store_error(
         self,
@@ -391,10 +384,7 @@ class MainWindow(QMainWindow):
         return ""
 
     def _build_actionable_settings_error(self, detail: str) -> str:
-        hint = self._t_or_default(
-            "ui_hint_fix_settings",
-            "Fix the highlighted fields or choose a valid JSON settings profile.",
-        )
+        hint = self._t("ui_hint_fix_settings")
         cleaned_detail = detail.strip()
         if not cleaned_detail:
             return hint
@@ -405,8 +395,7 @@ class MainWindow(QMainWindow):
 
     def _format_ini_not_supported_error(self, path: Path) -> str:
         return self._build_actionable_settings_error(
-            f"INI settings profiles are no longer supported [{path}]. "
-            "Use a JSON settings profile (*.json), for example settings.json."
+            self._t("ui_error_ini_not_supported", path=str(path))
         )
 
     def _compute_generation_blocking_error(self) -> str:
@@ -550,9 +539,7 @@ class MainWindow(QMainWindow):
         start_dir = str(self.settings_path.parent)
         selected_path, _selected_filter = QFileDialog.getOpenFileName(
             self,
-            self._t_or_default(
-                "ui_dialog_title_choose_settings_file", "Select settings profile"
-            ),
+            self._t("ui_dialog_title_choose_settings_file"),
             start_dir,
             self._t("ui_file_filter_json"),
         )
@@ -565,9 +552,7 @@ class MainWindow(QMainWindow):
         start_path = str(self.settings_path)
         selected_path, _selected_filter = QFileDialog.getSaveFileName(
             self,
-            self._t_or_default(
-                "ui_dialog_title_save_settings_file", "Save settings profile"
-            ),
+            self._t("ui_dialog_title_save_settings_file"),
             start_path,
             self._t("ui_file_filter_json"),
         )

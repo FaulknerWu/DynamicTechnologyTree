@@ -6,6 +6,7 @@ from typing import Any
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QTabWidget, QVBoxLayout, QWidget
 
+from gui.i18n import t
 from gui.settings_json_editor import SettingsJsonEditor
 from gui.settings_renderer import SettingsRenderer, render_settings_fields
 from settings import Settings
@@ -29,7 +30,7 @@ class SettingsPanel(QWidget):
 
         self.settings = settings or Settings()
         self.schema = schema
-        self._translate = translate or (lambda key: key)
+        self._translate = translate or (lambda key: t(key, "english"))
         self._renderer_valid = True
         self._renderer_error = ""
         self._raw_editor_valid = True
@@ -50,11 +51,11 @@ class SettingsPanel(QWidget):
 
         self.tabs_widget: QTabWidget = self.settings_renderer.tabs_widget
         self.raw_editor = SettingsJsonEditor(
-            settings=self.settings, parent=self.tabs_widget
+            settings=self.settings,
+            translate=self._translate,
+            parent=self.tabs_widget,
         )
-        self.apply_raw_button = QPushButton(
-            self._t_or_default("ui_action_apply_json", "Apply JSON")
-        )
+        self.apply_raw_button = QPushButton(self._translate("ui_action_apply_json"))
         self.apply_raw_button.setObjectName("settingsPanelApplyRawButton")
 
         self.advanced_tab = QWidget(self.tabs_widget)
@@ -70,7 +71,7 @@ class SettingsPanel(QWidget):
 
         self.tabs_widget.addTab(
             self.advanced_tab,
-            self._t_or_default("ui_tab_advanced", "Advanced"),
+            self._translate("ui_tab_advanced"),
         )
 
         self.apply_raw_button.clicked.connect(self.apply_raw_editor_changes)
@@ -81,14 +82,20 @@ class SettingsPanel(QWidget):
         )
 
     def apply_raw_editor_changes(self) -> bool:
-        applied = self.raw_editor.apply_to_bound_settings()
-        if not applied:
+        validated_settings = self.raw_editor.snapshot_validated_settings()
+        if validated_settings is None:
             self.raw_apply_finished.emit(False, self.raw_editor.validation_error)
             return False
 
-        self.settings_renderer.refresh_from_settings()
+        self.set_settings(validated_settings)
         self.raw_apply_finished.emit(True, "")
         return True
+
+    def set_settings(self, settings: Settings) -> None:
+        self.settings = settings
+        self.settings_renderer.set_settings(settings)
+        self.raw_editor.set_settings(settings)
+        self._emit_validation_changed()
 
     def refresh_from_settings(self) -> None:
         self.settings_renderer.refresh_from_settings()
@@ -100,15 +107,14 @@ class SettingsPanel(QWidget):
             self._translate = translate
 
         self.settings_renderer.retranslate(self._translate)
-        self.apply_raw_button.setText(
-            self._t_or_default("ui_action_apply_json", "Apply JSON")
-        )
+        self.raw_editor.retranslate(self._translate)
+        self.apply_raw_button.setText(self._translate("ui_action_apply_json"))
 
         advanced_index = self.tabs_widget.indexOf(self.advanced_tab)
         if advanced_index != -1:
             self.tabs_widget.setTabText(
                 advanced_index,
-                self._t_or_default("ui_tab_advanced", "Advanced"),
+                self._translate("ui_tab_advanced"),
             )
 
     @property
@@ -144,12 +150,6 @@ class SettingsPanel(QWidget):
     def _emit_validation_changed(self) -> None:
         is_valid, error_message = self.validation_state()
         self.validation_changed.emit(is_valid, error_message)
-
-    def _t_or_default(self, key: str, fallback: str) -> str:
-        translated = self._translate(key)
-        if translated and translated != key:
-            return translated
-        return fallback
 
 
 __all__ = ["SettingsPanel"]

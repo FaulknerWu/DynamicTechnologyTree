@@ -27,15 +27,28 @@ DEFAULT_DISPLAY_MAX_PREREQ_DISPLAY = 2
 DEFAULT_SAVE_READER_MAX_MEMBER_UNCOMPRESSED_SIZE_BYTES = 256 * 1024 * 1024
 DEFAULT_SAVE_READER_MAX_TOTAL_UNCOMPRESSED_SIZE_BYTES = 512 * 1024 * 1024
 DEFAULT_SAVE_READER_MAX_PARSE_DIAGNOSTICS_PER_MEMBER = 20
-DEFAULT_PROGRESS_SAVE_PARSE_START = 5
-DEFAULT_PROGRESS_SAVE_PARSE_PARSE = 10
-DEFAULT_PROGRESS_LOAD_ORDER = 20
-DEFAULT_PROGRESS_RELATIONS = 35
-DEFAULT_PROGRESS_INGEST_L10N = 45
-DEFAULT_PROGRESS_RENDER = 50
-DEFAULT_PROGRESS_CYCLES = 60
-DEFAULT_PROGRESS_WRITE_OUTPUT = 80
-DEFAULT_PROGRESS_DONE = 100
+PROGRESS_MILESTONE_FIELD_ORDER: tuple[str, ...] = (
+    "save_parse_start",
+    "save_parse_parse",
+    "load_order",
+    "relations",
+    "ingest_l10n",
+    "render",
+    "cycles",
+    "write_output",
+    "done",
+)
+DEFAULT_PROGRESS_MILESTONES: dict[str, int] = {
+    "save_parse_start": 5,
+    "save_parse_parse": 10,
+    "load_order": 20,
+    "relations": 35,
+    "ingest_l10n": 45,
+    "render": 50,
+    "cycles": 60,
+    "write_output": 80,
+    "done": 100,
+}
 
 
 DEFAULT_TECHNOLOGY_ROOT = "common/technology"

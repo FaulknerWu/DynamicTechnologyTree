@@ -10,6 +10,7 @@ from typing import Any
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from dtt_core.error_localization import localization_key_for_error_code
 from dtt_core.events import EventKind, EventSink, GenerationEvent
 from dtt_core.prepared_run import AmbiguousPlayerEmpireError
 from dtt_core.run_outcome import RunOutcome, RunOutcomeCode
@@ -38,26 +39,6 @@ class GenerationOutcome:
     @property
     def success(self) -> bool:
         return self.code == GenerationOutcomeCode.SUCCESS
-
-
-_LOAD_ORDER_ERROR_KEYS: dict[str, str] = {
-    "missing_database_path": "ui_error_launcher_db_missing_database_path",
-    "empty_database_path": "ui_error_launcher_db_empty_database_path",
-    "missing_database": "ui_error_launcher_db_missing_database",
-    "database_not_file": "ui_error_launcher_db_not_a_file",
-    "database_locked": "ui_error_launcher_db_locked",
-    "open_failed": "ui_error_launcher_db_open_failed",
-    "read_failed": "ui_error_launcher_db_read_failed",
-    "corrupt_database": "ui_error_launcher_db_corrupt",
-    "database_error": "ui_error_launcher_db_query_failed",
-    "schema_playsets_missing": "ui_error_launcher_db_schema_missing_table",
-    "schema_playsets_mods_missing": "ui_error_launcher_db_schema_missing_table",
-    "schema_mods_missing": "ui_error_launcher_db_schema_missing_table",
-    "schema_playsets_columns": "ui_error_launcher_db_schema_missing_columns",
-    "schema_playsets_mods_columns": "ui_error_launcher_db_schema_missing_columns",
-    "schema_mods_columns": "ui_error_launcher_db_schema_missing_columns",
-    "no_active_playset": "ui_error_launcher_db_no_active_playset",
-}
 
 
 class _QtEventSink(EventSink):
@@ -236,14 +217,7 @@ class GenerationWorker(QThread):
         return details
 
     def _localize_core_error(self, outcome: RunOutcome, lang: str) -> str:
-        if outcome.error_code == "technology_swap_collision":
-            return t(
-                "ui_error_technology_swap_collision",
-                lang,
-                **self._error_details_dict(outcome),
-            )
-
-        key = _LOAD_ORDER_ERROR_KEYS.get(outcome.error_code)
+        key = localization_key_for_error_code(outcome.error_code)
         if key:
             # t() 在 key 不存在时返回 key 本身；检测到有效翻译时使用之
             translated = t(key, lang, **self._error_details_dict(outcome))
