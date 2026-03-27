@@ -1,3 +1,5 @@
+我把基础的版本写完后（当时还是个巨大的python脚本）后面就用AI开发了，但是那个时候我刚开始用AI不太会用，AI膨胀了几千行上去，现在搞得乱七八糟，有点积重难返的味道，我最近事情比较多，我在有时间后会把整个项目梳理一遍
+
 # Dynamic Technology Tree（Stellaris 科技树生成器）
 
 ![Dynamic Technology Tree](thumbnail.jpeg)
